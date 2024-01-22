@@ -3,6 +3,7 @@ from panopto_oauth2 import PanoptoOAuth2
 from panopto_uploader import PanoptoUploader
 import urllib3
 import os
+import shutil
 
 def parse_argument():
     """
@@ -20,38 +21,72 @@ def parse_argument():
     return parser.parse_args()
 
 
-def upload_directory(source_directory, uploader, parent_folder_id=None):
+def has_files(directory):
+    """
+    Check if there are any files in directory.
+    """
+    for root, _, files in os.walk(directory):
+        for file in files:
+            return True
+    return False
 
-    # First, get the child folders. We will use this to check if folders need to be created or not.
-    children = uploader.get_child_folders(folder_id=parent_folder_id)
 
-    for item in os.listdir(source_directory):
-        item_path = os.path.join(source_directory, item)
 
-        if os.path.isdir(item_path):
+def cleanup(filepath, dest="Processed/"):
+    # Ensure dest is created
+    if not os.path.exists(dest):
+        os.makedirs(dest)
 
-            # If the resource is a directory, check if the directory already exists. If it doesn't, then create it.
-            print(f'{item_path} is a directory')
+    # Move the file to it's destination
+    try:
+        shutil.move(filepath, dest)
+    except Exception as e:
+        print(f'Error: {e}')
 
-            # Create the folder
-            folder = uploader.create_folder(
-                folder_id=parent_folder_id,
-                folder_name=os.path.basename(item_path),
-                folder_description="Created by panopto-clone script")
 
-            # use returned folder.Name and folder.Id
+def clone(source_directory, uploader, parent_folder_id=None, max_errors = 5):
+    """
+    Copy a directory to Panopto
+    Directories are created in Panopto before the files are uploaded.
+    Empty directories are not created.
+    """
 
-            # Recurse into the directory after creating it in Panopto
-            upload_directory(item_path, uploader, folder['Id'])
+    error_count = 0
 
-        elif os.path.isfile(item_path):
+    if error_count <= max_errors:
 
-            # If the resource is a file, upload it.
-            print(f'{item_path} is a file')
+        for item in os.listdir(source_directory):
+            item_path = os.path.join(source_directory, item)
 
-            res = uploader.upload_video(file_path=item_path, folder_id=parent_folder_id)
+            if os.path.isdir(item_path):
 
-            print(res)
+                # Only process if there are files in item_path
+                if has_files(item_path):
+
+                    # Create the folder
+                    folder = uploader.create_folder(
+                        folder_id=parent_folder_id,
+                        folder_name=os.path.basename(item_path),
+                        folder_description="Created by panopto-clone script")
+
+                    # Recurse into the directory after creating it in Panopto
+                    clone(item_path, uploader, folder['Id'])
+
+            elif os.path.isfile(item_path):
+
+                try:
+                    # If the resource is a file, upload it.
+                    res = uploader.upload_video(file_path=item_path, folder_id=parent_folder_id)
+
+                    # Cleanup the file on the host.
+                    cleanup(item_path, "Processed/")
+
+                except Exception as e:
+                    # If there's an error, move the file to a folder, Failed/
+                    cleanup(item_path, "Failed/")
+                    error_count += 1
+    else:
+        print('Error count reached')
 
 
 def main():
@@ -65,7 +100,7 @@ def main():
 
     uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
 
-    upload_directory(
+    clone(
         source_directory=args.source,
         parent_folder_id=args.destination,
         uploader=uploader
