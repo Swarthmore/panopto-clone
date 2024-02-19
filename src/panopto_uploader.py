@@ -74,7 +74,7 @@ class PanoptoUploader:
         """
         Get a list of child folders from the given parent
         """
-        url = f'https://swarthmore.hosted.panopto.com/Panopto/api/v1/folders/{folder_id}/children?sortField={sort_field}&sortOrder={sort_order}&pageNumber={page_number}'
+        url = f'https://{0}/Panopto/api/v1/folders/{folder_id}/children?sortField={sort_field}&sortOrder={sort_order}&pageNumber={page_number}'.format(self.server)
         headers = {'content-type': 'application/json'}
 
         resp = self.requests_session.get(url=url, headers=headers)
@@ -86,7 +86,7 @@ class PanoptoUploader:
         """
         Create a folder in Panopto
         """
-        url = 'https://swarthmore.hosted.panopto.com/Panopto/api/v1/folders'.format(self.server)
+        url = 'https://{0}/Panopto/api/v1/folders'.format(self.server)
         headers = {'content-type': 'application/json'}
         payload = {'Name': folder_name, 'Description': folder_description, 'Parent': folder_id}
 
