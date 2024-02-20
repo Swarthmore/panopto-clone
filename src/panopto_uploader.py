@@ -27,16 +27,11 @@ class PanoptoUploader:
         self.server = server
         self.ssl_verify = ssl_verify
         self.oauth2 = oauth2
+        self.session = aiohttp.ClientSession()
 
         # to do this in aiohttp, use ssl=False with the request
         # self.requests_session.verify = self.ssl_verify
-
-    async def __aenter__(self):
-        session = aiohttp.ClientSession()
-        access_token = self.oauth2.get_access_token_authorization_code_grant()
-        session.headers.update({'Authorization': 'Bearer ' + access_token})
-        self.session = session
-        return self
+        self.__setup_or_refresh_access_token()
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.session.close()
