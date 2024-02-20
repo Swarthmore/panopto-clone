@@ -1,4 +1,7 @@
 import argparse
+
+import aiohttp
+
 from panopto_oauth2 import PanoptoOAuth2
 from panopto_uploader import PanoptoUploader
 from panopto_utils import create_directory_skeleton
@@ -29,16 +32,24 @@ async def main():
         # This line is needed to suppress annoying warning message.
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    print('Authorizing')
     oauth2 = PanoptoOAuth2(args.server, args.client_id, args.client_secret, not args.skip_verify)
+    access_token = oauth2.get_access_token_authorization_code_grant()
 
+    print('Creating uploader')
     uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
 
-    await create_directory_skeleton(
-        source_directory=args.source,
-        uploader=uploader,
-        parent_folder_id=args.destination
-    )
+    async with aiohttp.ClientSession() as session:
+        # Set the access token
+        session.headers.update({'Authorization': 'Bearer ' + access_token})
 
+        print('Creating directories')
+        await create_directory_skeleton(
+            source_directory=args.source,
+            uploader=uploader,
+            parent_folder_id=args.destination,
+            session=session
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())

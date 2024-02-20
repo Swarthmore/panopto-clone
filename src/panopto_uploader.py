@@ -27,16 +27,8 @@ class PanoptoUploader:
         self.server = server
         self.ssl_verify = ssl_verify
         self.oauth2 = oauth2
-        self.session = aiohttp.ClientSession()
 
-        # to do this in aiohttp, use ssl=False with the request
-        # self.requests_session.verify = self.ssl_verify
-        self.__setup_or_refresh_access_token()
-
-    async def __aexit__(self, exc_type, exc, tb):
-        await self.session.close()
-
-    async def __setup_or_refresh_access_token(self):
+    def __setup_or_refresh_access_token(self, session):
         """
         This method invokes OAuth2 Authorization Code Grant authorization flow.
         It goes through browser UI for the first time.
@@ -44,9 +36,9 @@ class PanoptoUploader:
         This is called at the initialization of the class, as well as when 401 (Unaurhotized) is returend.
         """
         access_token = self.oauth2.get_access_token_authorization_code_grant()
-        self.session.headers.update({'Authorization': 'Bearer ' + access_token})
+        session.headers.update({'Authorization': 'Bearer ' + access_token})
 
-    async def __inspect_response_is_retry_needed(self, response):
+    async def __inspect_response_is_retry_needed(self, session, response):
         """
         Inspect the response of an aiohttp call.
         True indicates the retry needed, False indicates success. Otherwise, an exception is thrown.
@@ -59,7 +51,7 @@ class PanoptoUploader:
 
         if response.status == 403:
             print('Forbidden. This may mean token expired. Refreshing access token.')
-            await self.__setup_or_refresh_access_token()  # Ensure this method is async and awaits the token refresh
+            self.__setup_or_refresh_access_token(session)  # Ensure this method is async and awaits the token refresh
             return True
 
         # For aiohttp, use response.raise_for_status() to automatically throw if the status is an error code
@@ -75,15 +67,21 @@ class PanoptoUploader:
         # This line might be redundant due to raise_for_status above, but included for clarity
         return False
 
-    async def create_folder(self, folder_name, folder_id, folder_description=None):
+    async def create_folder(self, folder_name, folder_id, session, folder_description=None):
         """
         Create a folder in Panopto
         """
         try:
             url = f'https://{self.server}/Panopto/api/v1/folders'
             payload = {'Name': folder_name, 'Description': folder_description, 'Parent': folder_id}
-            res = await self.session.post(url, json=payload, ssl=self.ssl_verify)
-            return await res.json()
+            res = await session.post(url, json=payload, ssl=self.ssl_verify)
+
+            if res.status == 200:
+                return await res.json()
+            else:
+                text = await res.text()
+                return
+
         except aiohttp.ClientResponseError as e:
             # Handle client response errors (e.g., 404, 403, 500)
             print(f'HTTP Error: {e}')
@@ -94,13 +92,13 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def get_child_folders(self, folder_id, page_number=0, sort_order="Desc", sort_field="Name"):
+    async def get_child_folders(self, folder_id, session, page_number=0, sort_order="Desc", sort_field="Name"):
         """
         Get a list of child folders from the given parent
         """
         try:
             url = f'https://{self.server}/Panopto/api/v1/folders/{folder_id}/children?sortField={sort_field}&sortOrder={sort_order}&pageNumber={page_number}'
-            res = await self.session.get(url, ssl=self.ssl_verify)
+            res = await session.get(url, ssl=self.ssl_verify)
             return await res.json()
         except aiohttp.ClientResponseError as e:
             # Handle client response errors (e.g., 404, 403, 500)
@@ -112,12 +110,12 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def upload_video(self, file_path, folder_id):
+    async def upload_video(self, session, file_path, folder_id):
         """
         Main upload method to go through all required steps.
         """
         # step 1 - Create a session
-        session_upload = await self.__create_session(folder_id)
+        session_upload = await self.__create_session(folder_id, session)
         upload_id = session_upload['ID']
         upload_target = session_upload['UploadTarget']
 
@@ -129,20 +127,20 @@ class PanoptoUploader:
         await self.__multipart_upload_single_file(upload_target, MANIFEST_FILE_NAME)
 
         # step 4 - finish the upload
-        await self.__finish_upload(session_upload)
+        await self.__finish_upload(session_upload, session)
 
         # step 5 - monitor the progress of processing
-        await self.__monitor_progress(upload_id)
+        await self.__monitor_progress(upload_id, session)
 
-    async def __create_session(self, folder_id):
+    async def __create_session(self, session, folder_id):
         """
         Create an upload session. Return sessionUpload object.
         """
         while True:
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload'
             payload = {'FolderId': folder_id}
-            resp = await self.session.post(url=url, json=payload)
-            if not self.__inspect_response_is_retry_needed(resp):
+            resp = await session.post(url=url, json=payload)
+            if not self.__inspect_response_is_retry_needed(session, response=resp):
                 break
         return await resp.json()
 
@@ -213,7 +211,7 @@ class PanoptoUploader:
         with codecs.open(manifest_file_name, 'w', 'utf-8') as fw:
             fw.write(content)
 
-    async def __finish_upload(self, session_upload):
+    async def __finish_upload(self, session, session_upload):
         """
         Finish upload.
         """
@@ -225,18 +223,18 @@ class PanoptoUploader:
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
             payload = copy.copy(session_upload)
             payload['State'] = 1  # Upload Completed
-            resp = await self.session.put(url=url, json=payload)
+            resp = await session.put(url=url, json=payload)
             if not await self.__inspect_response_is_retry_needed(resp):
                 break
 
-    async def __monitor_progress(self, upload_id):
+    async def __monitor_progress(self, session, upload_id):
         """
         Polling status API until process completes.
         """
         while True:
             time.sleep(5)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
-            resp = await self.session.get(url=url)
+            resp = await session.get(url=url)
             if self.__inspect_response_is_retry_needed(resp):
                 # If we get Unauthorized and token is refreshed, ignore the response at this time and wait for next
                 # time.
