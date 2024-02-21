@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 
@@ -9,6 +10,9 @@ async def create_directory_skeleton(source_directory, uploader, session, created
         created_folders = {}
 
     for item in os.listdir(source_directory):
+
+        # limit api rates
+        await asyncio.sleep(5)
 
         item_path = os.path.join(source_directory, item)
 
