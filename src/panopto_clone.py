@@ -10,7 +10,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress
 import os
-from constants import CACHE_CREATED_FOLDERS, CACHE_FILES_TO_UPLOAD
+from constants import CACHE_CREATED_FOLDERS, CACHE_FILES_TO_UPLOAD, CACHE_UPLOADED_FILES
+from theme import panopto_clone_theme
 
 
 def parse_argument():
@@ -69,34 +70,53 @@ def parse_argument():
         required=False,
         help="Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.")
 
+    parser.add_argument(
+        "--max-concurrent-tasks",
+        dest="max_concurrent_tasks",
+        default=5,
+        required=False,
+        help="How many uploads should occur concurrently.")
+
     return parser.parse_args()
 
 
 async def main():
     args = parse_argument()
 
-    # Before doing anything, check to see if the user want's to clean their cache
-    if args.clean:
-        # Remove .cache files.
-        os.remove(CACHE_CREATED_FOLDERS)
-        os.remove(CACHE_FILES_TO_UPLOAD)
-
-    if args.skip_verify:
-        # This line is needed to suppress annoying warning message.
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
     progress = Progress(
         "[progress.description]{task.description}",
         "[progress.percentage]{task.percentage:>3.0f}%",
-        console=Console())
+        console=Console(theme=panopto_clone_theme))
 
     with progress:
 
-        progress.console.log('[grey62]Authorizing')
+        # Before doing anything, check to see if the user want's to clean their cache
+        if args.clean:
+            # Remove .cache files.
+            if os.path.exists(CACHE_CREATED_FOLDERS):
+                progress.console.log(f'Deleting {CACHE_CREATED_FOLDERS}', style='info')
+                os.remove(CACHE_CREATED_FOLDERS)
+
+            if os.path.exists(CACHE_FILES_TO_UPLOAD):
+                progress.console.log(f'Deleting {CACHE_FILES_TO_UPLOAD}', style='info')
+                os.remove(CACHE_FILES_TO_UPLOAD)
+
+            if os.path.exists(CACHE_UPLOADED_FILES):
+                progress.console.log(f'Deleting {CACHE_UPLOADED_FILES}', style='info')
+                os.remove(CACHE_UPLOADED_FILES)
+
+        if args.skip_verify:
+            # This line is needed to suppress annoying warning message.
+            progress.console.log('SSL verification is off', style='info')
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        progress.console.log('Authorizing with Panopto', style='info')
+
         oauth2 = PanoptoOAuth2(args.server, args.client_id, args.client_secret, not args.skip_verify)
+
         access_token = oauth2.get_access_token_authorization_code_grant()
 
-        progress.console.log('[grey62]Creating uploader')
+        progress.console.log('Creating uploader', style='info')
 
         uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
 
@@ -110,7 +130,7 @@ async def main():
                 created_folders = retrieve_dict_from_disk(CACHE_CREATED_FOLDERS)
             else:
                 # Create the directories
-                progress.console.log('[grey62]Creating directories')
+                progress.console.log('Creating directories', style='info')
                 created_folders = await create_directory_skeleton(
                     source_directory=args.source,
                     uploader=uploader,
@@ -122,7 +142,7 @@ async def main():
             # Get a list of all files that will be uploaded
             tasks = []
             files = [str(file) for file in Path(args.source).rglob('*') if file.is_file()]
-            progress.console.log(f'[grey62]Found {len(files)} to upload')
+            progress.console.log(f'Found {len(files)} to upload', style='info')
             write_list_to_file(CACHE_FILES_TO_UPLOAD, files)
 
             for file in files:
@@ -140,17 +160,17 @@ async def main():
                     task_id=task_id)
                 tasks.append(task)
 
-            progress.console.log(f'[grey62]Scheduled {len(tasks)} upload tasks')
+            progress.console.log(f'Scheduled {len(tasks)} upload tasks', style='info')
 
             # Function to process tasks in chunks
             async def process_tasks_in_chunks(tasks_to_chunk, chunk_size):
                 for i in range(0, len(tasks_to_chunk), chunk_size):
                     chunk = tasks_to_chunk[i:i + chunk_size]
                     await asyncio.gather(*chunk)
-                    progress.console.log(f"[grey89]Uploaded a chunk of {len(chunk)} files")
+                    progress.console.log(f"[grey89]Uploaded {len(chunk)} chunks of files", style='info')
 
-            # Now process tasks in chunks of 3
-            await process_tasks_in_chunks(tasks, 4)
+            # Now process tasks in chunks defined by max_concurrent_tasks
+            await process_tasks_in_chunks(tasks, int(args.max_concurrent_tasks))
 
 
 if __name__ == "__main__":

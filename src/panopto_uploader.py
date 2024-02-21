@@ -1,17 +1,18 @@
 import asyncio
 import os
+from math import ceil
 import aiohttp
 import codecs
 import time
 from datetime import datetime
 import copy
 import aioboto3
-import math
 from constants import CACHE_UPLOADED_FILES
+from utils import bytes_to_megabytes
 
 # Size of each part of multipart upload.
 # This must be between 5MB and 25MB. Panopto server may fail if the size is more than 25MB.
-PART_SIZE = 25 * 1024 * 1024
+PART_SIZE = 5 * 1024 * 1024
 
 # Template for manifest XML file.
 MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
@@ -132,7 +133,8 @@ class PanoptoUploader:
     async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id):
 
         def update_progress(msg, completed=None):
-            log_msg = f'[bold][{task_id}][/bold] [dim]{os.path.basename(file_path)}->{folder_id}[/dim] {msg}'
+            # prefix the task id to the message
+            log_msg = f'[bold][{task_id}][/bold] {msg}'
             progress.console.log(log_msg)
             progress.update(
                 task_id,
@@ -285,8 +287,9 @@ class PanoptoUploader:
             parts = []
             part_number = 1
             file_size = os.path.getsize(file_path)
-            total_parts = math.ceil(file_size / PART_SIZE)
+            file_size_mb = bytes_to_megabytes(file_size)
             uploaded_bytes = 0
+            upload_start_time = time.perf_counter()
 
             # Read and upload each part
             with open(file_path, 'rb') as file:
@@ -313,12 +316,18 @@ class PanoptoUploader:
 
                     part_number += 1
                     uploaded_bytes += len(data)
+                    uploaded_mb = bytes_to_megabytes(uploaded_bytes)
 
                     upload_time = end_time - start_time  # Time taken to upload the part
                     speed_mbps = (len(data) / upload_time) / (1024 * 1024)  # Upload speed in MBps
+                    elapsed_time = end_time - upload_start_time
 
-                    pct_complete = round((uploaded_bytes / file_size) * 100, 2)
-                    msg = f'[blue]Elapsed: {upload_time:.2f} [yellow]Speed: {speed_mbps:.2f} MBps [red]Uploaded: {uploaded_bytes}b [green]Part: {part_number}/{total_parts}'
+                    pct_complete = ceil((uploaded_bytes / file_size) * 100)
+
+                    msg_uploaded = f'[bright_yellow]{uploaded_mb:.2f}[bright_yellow][dim]/[/dim][yellow]{file_size_mb:.2f}[dim]Mb[/dim][/yellow]'
+                    msg_speed = f'[cyan]{speed_mbps:.2f}[dim]MBps[/dim][/cyan]'
+                    msg_elapsed = f'[green]{elapsed_time:.2f}[dim]s[/dim][/green]'
+                    msg = f'{msg_uploaded} {msg_speed} {msg_elapsed}'
 
                     update_progress(
                         msg,
@@ -397,7 +406,7 @@ class PanoptoUploader:
                     continue
 
                 session_upload = await resp.json()
-                update_progress('[green]State: {0} [blue]Elapsed: {1}s'.format(
+                update_progress('[dim]State: {0} [blue]Elapsed: {1}s'.format(
                     session_upload['State'],
                     round(time.time() - start_time, 2)))
 

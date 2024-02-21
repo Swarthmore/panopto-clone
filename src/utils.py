@@ -2,6 +2,18 @@ import os
 import pickle
 
 
+def bytes_to_megabytes(bytes_value):
+    """
+    Convert bytes to megabytes
+
+    :param bytes_value: bytes
+    :return: megabytes
+    """
+    megabytes = bytes_value / (1024 * 1024)  # Convert bytes to megabytes
+    megabytes = round(megabytes, 2)  # Round to 2 decimal places
+    return megabytes
+
+
 def save_dict_to_disk(data_dict, file_path):
     """
     Saves a dictionary to disk using pickle.
