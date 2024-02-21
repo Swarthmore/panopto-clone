@@ -19,7 +19,7 @@ REDIRECT_PORT = 9127
 DEFAULT_SCOPE = ('openid', 'api')
 
 
-class PanoptoOAuth2():
+class PanoptoOAuth2:
     def __init__(self, server, client_id, client_secret, ssl_verify):
         self.client_id = client_id
         self.client_secret = client_secret
