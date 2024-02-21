@@ -10,6 +10,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress
 import os
+from constants import CACHE_CREATED_FOLDERS, CACHE_FILES_TO_UPLOAD
 
 
 def parse_argument():
@@ -17,27 +18,77 @@ def parse_argument():
     Argument definition and handling.
     """
     parser = argparse.ArgumentParser(description='Upload a single video file to Panopto server')
-    parser.add_argument('--server', dest='server', required=True, help='Server name as FQDN')
-    parser.add_argument('--destination', dest='destination', required=True, help='ID of target Panopto folder')
-    parser.add_argument('--source', dest='source', required=True, help='Absolute path to source folder')
-    parser.add_argument('--client-id', dest='client_id', required=True, help='Client ID of OAuth2 client')
-    parser.add_argument('--client-secret', dest='client_secret', required=True, help='Client Secret of OAuth2 client')
-    parser.add_argument('--skip-verify', dest='skip_verify', action='store_true', required=False,
-                        help='Skip SSL certificate verification. (Never apply to the production code)')
-    parser.add_argument('--batch-size', dest='batch_size', required=False,
-                        help="How many files to sync at a time")
+
+    parser.add_argument(
+        '--server',
+        dest='server',
+        required=True,
+        help='Server name as FQDN')
+
+    parser.add_argument(
+        '--destination',
+        dest='destination',
+        required=True,
+        help='ID of target Panopto folder')
+
+    parser.add_argument(
+        '--source',
+        dest='source',
+        required=True,
+        help='Absolute path to source folder')
+
+    parser.add_argument(
+        '--client-id',
+        dest='client_id',
+        required=True,
+        help='Client ID of OAuth2 client')
+
+    parser.add_argument(
+        '--client-secret',
+        dest='client_secret',
+        required=True,
+        help='Client Secret of OAuth2 client')
+
+    parser.add_argument(
+        '--skip-verify',
+        dest='skip_verify',
+        action='store_true',
+        required=False,
+        help='Skip SSL certificate verification. (Never apply to the production code)')
+
+    parser.add_argument(
+        '--batch-size',
+        dest='batch_size',
+        required=False,
+        help="How many files to sync at a time")
+
+    parser.add_argument(
+        "--clean",
+        dest="clean",
+        action='store_true',
+        required=False,
+        help="Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.")
+
     return parser.parse_args()
 
 
 async def main():
     args = parse_argument()
 
+    # Before doing anything, check to see if the user want's to clean their cache
+    if args.clean:
+        # Remove .cache files.
+        os.remove(CACHE_CREATED_FOLDERS)
+        os.remove(CACHE_FILES_TO_UPLOAD)
+
     if args.skip_verify:
         # This line is needed to suppress annoying warning message.
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    progress = Progress("[progress.description]{task.description}", "[progress.percentage]{task.percentage:>3.0f}%",
-                        console=Console())
+    progress = Progress(
+        "[progress.description]{task.description}",
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        console=Console())
 
     with progress:
 
@@ -55,8 +106,8 @@ async def main():
             session.headers.update({'Authorization': 'Bearer ' + access_token})
 
             # Check to see if folders.cache exists
-            if os.path.exists('.folders.cache'):
-                created_folders = retrieve_dict_from_disk('.folders.cache')
+            if os.path.exists(CACHE_CREATED_FOLDERS):
+                created_folders = retrieve_dict_from_disk(CACHE_CREATED_FOLDERS)
             else:
                 # Create the directories
                 progress.console.log('[grey62]Creating directories')
@@ -66,27 +117,19 @@ async def main():
                     parent_folder_id=args.destination,
                     session=session
                 )
-                save_dict_to_disk(created_folders, '.folders.cache')
-
-            progress.console.log(created_folders)
+                save_dict_to_disk(created_folders, CACHE_CREATED_FOLDERS)
 
             # Get a list of all files that will be uploaded
             tasks = []
             files = [str(file) for file in Path(args.source).rglob('*') if file.is_file()]
             progress.console.log(f'[grey62]Found {len(files)} to upload')
-            write_list_to_file('.files.cache', files)
+            write_list_to_file(CACHE_FILES_TO_UPLOAD, files)
 
             for file in files:
                 task_id = progress.add_task(f"[blue]{file}", total=100, visible=False)
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
-
-                # if there is more than one entry, have the user select
-                # if len(filtered_dict) > 1:
-                    # target_folder_id = input("Enter the key of the folder you want to upload to")
-                # elif not filtered_dict:
-                #     target_folder_id = args.destination
-                # else:
+                # This will select the id of the first item in filtered_dict
                 target_folder_id = next(iter(filtered_dict.values()))['Id']
 
                 task = uploader.upload_video_with_progress(

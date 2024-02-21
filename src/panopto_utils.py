@@ -1,5 +1,4 @@
 import os
-from utils import has_files
 
 
 async def create_directory_skeleton(source_directory, uploader, session, created_folders=None, parent_folder_id=None):

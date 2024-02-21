@@ -1,6 +1,6 @@
 import os
-
 import pickle
+
 
 def save_dict_to_disk(data_dict, file_path):
     """
@@ -11,6 +11,7 @@ def save_dict_to_disk(data_dict, file_path):
     """
     with open(file_path, 'wb') as file:
         pickle.dump(data_dict, file)
+
 
 def retrieve_dict_from_disk(file_path):
     """
@@ -23,12 +24,13 @@ def retrieve_dict_from_disk(file_path):
         data_dict = pickle.load(file)
     return data_dict
 
+
 def has_files(directory):
     """
     Check if there are any files in directory.
     """
     for root, _, files in os.walk(directory):
-        for file in files:
+        for _ in files:
             return True
     return False
 
