@@ -135,7 +135,8 @@ async def main():
                     source_directory=args.source,
                     uploader=uploader,
                     parent_folder_id=args.destination,
-                    session=session
+                    session=session,
+                    progress=progress
                 )
                 save_dict_to_disk(created_folders, CACHE_CREATED_FOLDERS)
 
