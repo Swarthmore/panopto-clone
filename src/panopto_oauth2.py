@@ -61,14 +61,14 @@ class PanoptoOAuth2:
 
         # Open the authorization page by the browser.
         authorization_url, state = session.authorization_url(self.authorization_endpoint)
-        print()
-        print('Opening the browser for authorization: {0}'.format(authorization_url))
+        # print()
+        # print('Opening the browser for authorization: {0}'.format(authorization_url))
         webbrowser.open_new_tab(authorization_url)
 
         # Launch HTTP server to receive the redirect after authorization.
         redirected_path = ''
         with RedirectTCPServer() as httpd:
-            print('HTTP server started at port {0}. Waiting for redirect.'.format(REDIRECT_PORT))
+            # print('HTTP server started at port {0}. Waiting for redirect.'.format(REDIRECT_PORT))
             # Serve one request.
             httpd.handle_request()
             # The property may not be readable immediately. Wait until it becomes valid.
@@ -76,7 +76,7 @@ class PanoptoOAuth2:
                 time.sleep(1)
             redirected_path = httpd.last_get_path
 
-        print()
+        # print()
         # print('Get a new access token with authorization code, which is provided as return path: {0}'.format(
         #     redirected_path))
         session.fetch_token(self.access_token_endpoint, client_secret=self.client_secret,
@@ -93,15 +93,15 @@ class PanoptoOAuth2:
         Returning None if failing to get the new access token with any reason.
         '''
         try:
-            print()
-            print('Read cached token from {0}'.format(self.cache_file))
+            # print()
+            # print('Read cached token from {0}'.format(self.cache_file))
             with open(self.cache_file, 'rb') as fr:
                 token = pickle.load(fr)
 
             session = OAuth2Session(self.client_id, token=token)
 
-            print()
-            print('Get a new access token by using saved refresh token.')
+            # print()
+            # print('Get a new access token by using saved refresh token.')
             extra = {'client_id': self.client_id, 'client_secret': self.client_secret}
             session.refresh_token(self.access_token_endpoint, verify=self.ssl_verify, **extra)
             self.__save_token_to_cache(session.token)
@@ -130,8 +130,8 @@ class PanoptoOAuth2:
         session = OAuth2Session(client=LegacyApplicationClient(client_id=self.client_id))
 
         # Retrieve access token
-        print()
-        print('Get a new access token with username and password.')
+        # print()
+        # print('Get a new access token with username and password.')
         scope = DEFAULT_SCOPE
         session.fetch_token(
             token_url=self.access_token_endpoint, scope=scope,

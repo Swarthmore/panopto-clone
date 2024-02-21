@@ -20,7 +20,7 @@ async def create_directory_skeleton(source_directory, uploader, session, created
             # Create the folder
 
             fp = os.path.splitext(os.path.basename(item_path))[0]
-            print(f'Creating folder {fp}')
+            # print(f'Creating folder {fp}')
             folder = await uploader.create_folder(
                 folder_id=parent_folder_id,
                 folder_name=os.path.basename(item_path),
