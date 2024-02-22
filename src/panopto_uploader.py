@@ -158,12 +158,12 @@ class PanoptoUploader:
 
         # Write the file path, folder location, and other stats to disk
         try:
-            with open(CACHE_UPLOADED_FILES, 'a') as file:
+            with open(CACHE_UPLOADED_FILES, 'a', encoding='utf-8') as file:
                 line = f'"{task_id}","{file_path}","{folder_id}"\n'
                 file.write(line)
         except FileNotFoundError:
             # Handle case when the cache file does not exist
-            with open(CACHE_UPLOADED_FILES, 'w') as file:
+            with open(CACHE_UPLOADED_FILES, 'w', encoding='utf-8') as file:
                 # Write the header line before anything else
                 lines = [
                     '"task_id","file_path","folder_id"\n',
