@@ -47,7 +47,7 @@ class PanoptoUploader:
         access_token = self.oauth2.get_access_token_authorization_code_grant()
         session.headers.update({'Authorization': 'Bearer ' + access_token})
 
-    async def __inspect_response_is_retry_needed(self, session, response):
+    async def __inspect_response_is_retry_needed(self, session, response, update_progress):
         """
         Inspect the response of an aiohttp call.
         True indicates the retry needed, False indicates success. Otherwise, an exception is thrown.
@@ -59,17 +59,19 @@ class PanoptoUploader:
             return False
 
         if response.status == 403:
-            # print('Forbidden. This may mean token expired. Refreshing access token.')
+            update_progress('Forbidden. This may mean token expired. Refreshing access token.', style='warning')
             self.__setup_or_refresh_access_token(session)  # Ensure this method is async and awaits the token refresh
             return True
 
         # For aiohttp, use response.raise_for_status() to automatically throw if the status is an error code
         # Make sure to use it where it doesn't preempt your checks for recoverable error codes like 403
         try:
+            update_progress(f'Received response status {response.status}', style='danger')
             response.raise_for_status()
         except aiohttp.ClientError as e:
             # Handle specific aiohttp exceptions or re-raise
             # This is where you might log the error or handle specific HTTP errors differently
+            update_progress(e, style='danger')
             raise e
 
         # If you've gotten here, it means neither 200 nor 403 status, and raise_for_status didn't trigger an exception
@@ -189,7 +191,8 @@ class PanoptoUploader:
         update_progress("Creating session")
         session_upload = await self.__create_session(
             session=session,
-            folder_id=folder_id
+            folder_id=folder_id,
+            update_progress=update_progress
         )
         upload_id = session_upload['ID']
         upload_target = session_upload['UploadTarget']
@@ -250,7 +253,7 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def __create_session(self, session, folder_id):
+    async def __create_session(self, session, folder_id, update_progress):
         """
         Create an upload session. Return sessionUpload object.
         """
@@ -280,6 +283,7 @@ class PanoptoUploader:
                 # Check if it's a retryable error
                 if retry_count >= max_retries:
                     # If max retries exceeded, raise the error
+                    update_progress(f"Retry limit of {max_retries} reached", style='danger')
                     raise e
                 else:
                     # Increment retry count
@@ -289,7 +293,7 @@ class PanoptoUploader:
                     delay = base_delay * 2 ** retry_count + random.uniform(0, 1)
 
                     # Log the retry attempt
-                    update_progress(f"Retry attempt {retry_count} after {delay} seconds")
+                    update_progress(f"Retry attempt {retry_count} after {delay} seconds", style='warning')
 
                     # Wait for the calculated delay before retrying
                     await asyncio.sleep(delay)
@@ -314,66 +318,79 @@ class PanoptoUploader:
                                   aws_access_key_id="wow",
                                   aws_secret_access_key="wow") as s3:
 
-            mpu = await s3.create_multipart_upload(Bucket=bucket, Key=object_key)
-            parts = []
-            part_number = 1
-            file_size = os.path.getsize(file_path)
-            file_size_mb = bytes_to_megabytes(file_size)
-            uploaded_bytes = 0
-            upload_start_time = time.perf_counter()
+            try:
+                mpu = await s3.create_multipart_upload(Bucket=bucket, Key=object_key)
+                parts = []
+                part_number = 1
+                file_size = os.path.getsize(file_path)
+                file_size_mb = bytes_to_megabytes(file_size)
+                uploaded_bytes = 0
+                upload_start_time = time.perf_counter()
 
-            # Read and upload each part
-            with open(file_path, 'rb') as file:
+                # Read and upload each part
+                with open(file_path, 'rb') as file:
 
-                while True:
-                    data = file.read(PART_SIZE)
-                    if not data:
-                        break
+                    while True:
+                        data = file.read(PART_SIZE)
+                        if not data:
+                            break
 
-                    start_time = time.perf_counter()
-                    part = await s3.upload_part(
-                        Bucket=bucket,
-                        Key=object_key,
-                        PartNumber=part_number,
-                        UploadId=mpu['UploadId'],
-                        Body=data
-                    )
-                    end_time = time.perf_counter()
+                        start_time = time.perf_counter()
+                        part = await s3.upload_part(
+                            Bucket=bucket,
+                            Key=object_key,
+                            PartNumber=part_number,
+                            UploadId=mpu['UploadId'],
+                            Body=data
+                        )
+                        end_time = time.perf_counter()
 
-                    parts.append({
-                        'PartNumber': part_number,
-                        'ETag': part['ETag']
-                    })
+                        parts.append({
+                            'PartNumber': part_number,
+                            'ETag': part['ETag']
+                        })
 
-                    part_number += 1
-                    uploaded_bytes += len(data)
-                    uploaded_mb = bytes_to_megabytes(uploaded_bytes)
+                        part_number += 1
+                        uploaded_bytes += len(data)
+                        uploaded_mb = bytes_to_megabytes(uploaded_bytes)
 
-                    upload_time = end_time - start_time  # Time taken to upload the part
-                    speed_mbps = (len(data) / upload_time) / (1024 * 1024)  # Upload speed in MBps
-                    elapsed_time = end_time - upload_start_time
+                        upload_time = end_time - start_time  # Time taken to upload the part
+                        speed_mbps = (len(data) / upload_time) / (1024 * 1024)  # Upload speed in MBps
+                        elapsed_time = end_time - upload_start_time
 
-                    pct_complete = ceil((uploaded_bytes / file_size) * 100)
+                        pct_complete = ceil((uploaded_bytes / file_size) * 100)
 
-                    msg_uploaded = f'[bright_yellow]{uploaded_mb:.2f}[bright_yellow][dim]/[/dim][yellow]{file_size_mb:.2f}[dim]Mb[/dim][/yellow]'
-                    msg_speed = f'[cyan]{speed_mbps:.2f}[dim]MBps[/dim][/cyan]'
-                    msg_elapsed = f'[green]{elapsed_time:.2f}[dim]s[/dim][/green]'
-                    msg = f'{msg_uploaded} {msg_speed} {msg_elapsed}'
+                        msg_uploaded = f'[bright_yellow]{uploaded_mb:.2f}[bright_yellow][dim]/[/dim][yellow]{file_size_mb:.2f}[dim]Mb[/dim][/yellow]'
+                        msg_speed = f'[cyan]{speed_mbps:.2f}[dim]MBps[/dim][/cyan]'
+                        msg_elapsed = f'[green]{elapsed_time:.2f}[dim]s[/dim][/green]'
+                        msg = f'{msg_uploaded} {msg_speed} {msg_elapsed}'
 
-                    update_progress(
-                        msg,
-                        completed=pct_complete)
+                        update_progress(
+                            msg,
+                            completed=pct_complete)
 
-                    progress.update(task_id, refresh=True)
+                        progress.update(task_id, refresh=True)
+                        return
 
-            # Complete the upload
-            await s3.complete_multipart_upload(
-                Bucket=bucket,
-                Key=object_key,
-                UploadId=mpu['UploadId'],
-                MultipartUpload={'Parts': parts}
-            )
-            update_progress(f'[dark_goldenrod][bold]Upload complete')
+            except Exception as e:
+                error = str(e)
+                update_progress(f'{error}', style='danger')
+                raise
+
+            try:
+                # Complete the upload
+                await s3.complete_multipart_upload(
+                    Bucket=bucket,
+                    Key=object_key,
+                    UploadId=mpu['UploadId'],
+                    MultipartUpload={'Parts': parts}
+                )
+                update_progress(f'[dark_goldenrod][bold]Upload complete')
+            except Exception as e:
+                error = str(e)
+                update_progress(f'{error}', style='danger')
+                raise
+
 
     @staticmethod
     def __create_manifest_for_video(file_path, manifest_file_name):
