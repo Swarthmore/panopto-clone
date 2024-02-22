@@ -127,6 +127,7 @@ async def main():
 
             # Check to see if folders.cache exists
             if os.path.exists(CACHE_CREATED_FOLDERS):
+                progress.console.log('Using directories from cache', style='info')
                 created_folders = retrieve_dict_from_disk(CACHE_CREATED_FOLDERS)
             else:
                 # Create the directories
@@ -139,19 +140,25 @@ async def main():
                     progress=progress
                 )
                 save_dict_to_disk(created_folders, CACHE_CREATED_FOLDERS)
+                progress.console.log('Saved created folders cache', style='info')
 
             # Get a list of all files that will be uploaded
             tasks = []
             files = [str(file) for file in Path(args.source).rglob('*') if file.is_file()]
-            progress.console.log(f'Found {len(files)} to upload', style='info')
+            progress.console.log(f'Found {len(files)} videos', style='info')
             write_list_to_file(CACHE_FILES_TO_UPLOAD, files)
+            progress.console.log(f'Saved files to upload cache', style='info')
 
             for file in files:
-                task_id = progress.add_task(f"[blue]{file}", total=100, visible=False)
+                task_id = progress.add_task(f'{file}', total=100, visible=False)
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
                 # This will select the id of the first item in filtered_dict
-                target_folder_id = next(iter(filtered_dict.values()))['Id']
+                if filtered_dict:
+                    target_folder_id = next(iter(filtered_dict.values()))['Id']
+                else:
+                    target_folder_id = args.destination
+                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?', style='danger')
 
                 task = uploader.upload_video_with_progress(
                     folder_id=target_folder_id,
