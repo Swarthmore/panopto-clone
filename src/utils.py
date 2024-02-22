@@ -48,7 +48,7 @@ def has_files(directory):
 
 
 def write_list_to_file(file_name, list_variable):
-    with open(file_name, 'w', encoding='utf-8') as file:
+    with open(file_name, 'w', encoding='utf-8', errors='ignore') as file:
         # Ensure each item ends with a newline character
         lines = [f"{item}\n" for item in list_variable]
         file.writelines(lines)
