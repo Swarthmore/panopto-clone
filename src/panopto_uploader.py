@@ -59,19 +59,19 @@ class PanoptoUploader:
             return False
 
         if response.status == 403:
-            update_progress('Forbidden. This may mean token expired. Refreshing access token.', style='warning')
+            update_progress('[bold][yellow]Forbidden. This may mean token expired. Refreshing access token.[/yellow][/bold]')
             self.__setup_or_refresh_access_token(session)  # Ensure this method is async and awaits the token refresh
             return True
 
         # For aiohttp, use response.raise_for_status() to automatically throw if the status is an error code
         # Make sure to use it where it doesn't preempt your checks for recoverable error codes like 403
         try:
-            update_progress(f'Received response status {response.status}', style='danger')
+            update_progress(f'[bold][red]Received response status {response.status}[/red][/bold]')
             response.raise_for_status()
         except aiohttp.ClientError as e:
             # Handle specific aiohttp exceptions or re-raise
             # This is where you might log the error or handle specific HTTP errors differently
-            update_progress(e, style='danger')
+            update_progress(f'[bold][red]{e}[/red][/bold]')
             raise e
 
         # If you've gotten here, it means neither 200 nor 403 status, and raise_for_status didn't trigger an exception
@@ -283,7 +283,7 @@ class PanoptoUploader:
                 # Check if it's a retryable error
                 if retry_count >= max_retries:
                     # If max retries exceeded, raise the error
-                    update_progress(f"Retry limit of {max_retries} reached", style='danger')
+                    update_progress(f"[bold][red]Retry limit of {max_retries} reached[/red][/bold]")
                     raise e
                 else:
                     # Increment retry count
@@ -293,7 +293,7 @@ class PanoptoUploader:
                     delay = base_delay * 2 ** retry_count + random.uniform(0, 1)
 
                     # Log the retry attempt
-                    update_progress(f"Retry attempt {retry_count} after {delay} seconds", style='warning')
+                    update_progress(f"[bold][yellow]Retry attempt {retry_count} after {delay} seconds[/yellow][/bold]")
 
                     # Wait for the calculated delay before retrying
                     await asyncio.sleep(delay)
@@ -374,7 +374,7 @@ class PanoptoUploader:
 
             except Exception as e:
                 error = str(e)
-                update_progress(f'{error}', style='danger')
+                update_progress(f'[bold][red]{error}[/red][/bold]')
                 raise
 
             try:
@@ -388,7 +388,7 @@ class PanoptoUploader:
                 update_progress(f'[dark_goldenrod][bold]Upload complete')
             except Exception as e:
                 error = str(e)
-                update_progress(f'{error}', style='danger')
+                update_progress(f'[bold][red]{error}[/red][/bold]')
                 raise
 
 
