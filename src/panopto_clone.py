@@ -1,4 +1,6 @@
 import argparse
+import random
+
 import aiohttp
 from panopto_oauth2 import PanoptoOAuth2
 from panopto_uploader import PanoptoUploader
@@ -158,14 +160,24 @@ async def main():
                     target_folder_id = next(iter(filtered_dict.values()))['Id']
                 else:
                     target_folder_id = args.destination
-                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?', style='danger')
+                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
+                                         style='danger')
 
                 task = uploader.upload_video_with_progress(
                     folder_id=target_folder_id,
                     session=session,
                     progress=progress,
                     file_path=file,
-                    task_id=task_id)
+                    task_id=task_id,
+                    task_color=random.choice(['blue',
+                                              'bright_blue',
+                                              'magenta',
+                                              'bright_magenta',
+                                              'cyan',
+                                              'bright_cyan',
+                                              'white',
+                                              'bright_black']))
+
                 tasks.append(task)
 
             progress.console.log(f'Scheduled {len(tasks)} upload tasks', style='info')
@@ -175,7 +187,7 @@ async def main():
                 for i in range(0, len(tasks_to_chunk), chunk_size):
                     chunk = tasks_to_chunk[i:i + chunk_size]
                     await asyncio.gather(*chunk)
-                    progress.console.log(f"[grey89]Uploaded {len(chunk)} chunks of files", style='info')
+                    progress.console.log(f"Uploaded {len(chunk)} chunks of files", style='info')
 
             # Now process tasks in chunks defined by max_concurrent_tasks
             await process_tasks_in_chunks(tasks, int(args.max_concurrent_tasks))
