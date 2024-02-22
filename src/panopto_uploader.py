@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 from math import ceil
 import aiohttp
 import codecs
@@ -195,7 +196,7 @@ class PanoptoUploader:
 
         # step 2 - upload the video file
         update_progress("Uploading file")
-        await self.__multipart_upload_single_file(
+        await self.__multipart_upload_single_file_with_retry(
             upload_target=upload_target,
             file_path=file_path,
             progress=progress,
@@ -209,7 +210,7 @@ class PanoptoUploader:
             file_path,
             MANIFEST_FILE_NAME
         )
-        await self.__multipart_upload_single_file(
+        await self.__multipart_upload_single_file_with_retry(
             upload_target,
             file_path=MANIFEST_FILE_NAME,
             progress=progress,
@@ -263,6 +264,35 @@ class PanoptoUploader:
                 # print('Refreshing token')
                 break
         return await resp.json()
+
+    async def __multipart_upload_single_file_with_retry(self, upload_target, file_path, task_id, progress,
+                                                        update_progress=None):
+        retry_count = 0
+        max_retries = 5
+        base_delay = 1  # Base delay in seconds
+
+        while True:
+            try:
+                # Attempt the operation
+                await self.__multipart_upload_single_file(upload_target, file_path, task_id, progress, update_progress)
+                break  # If successful, exit the loop
+            except Exception as e:
+                # Check if it's a retryable error
+                if retry_count >= max_retries:
+                    # If max retries exceeded, raise the error
+                    raise e
+                else:
+                    # Increment retry count
+                    retry_count += 1
+
+                    # Calculate exponential backoff with jitter
+                    delay = base_delay * 2 ** retry_count + random.uniform(0, 1)
+
+                    # Log the retry attempt
+                    update_progress(f"Retry attempt {retry_count} after {delay} seconds")
+
+                    # Wait for the calculated delay before retrying
+                    await asyncio.sleep(delay)
 
     async def __multipart_upload_single_file(self, upload_target, file_path, task_id, progress, update_progress=None):
 
