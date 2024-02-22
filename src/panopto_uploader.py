@@ -254,6 +254,7 @@ class PanoptoUploader:
         Create an upload session. Return sessionUpload object.
         """
         while True:
+            await asyncio.sleep(5)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload'
             payload = {'FolderId': folder_id}
             headers = {'content-type': 'application/json'}
@@ -372,6 +373,7 @@ class PanoptoUploader:
 
         while True:
             # print('Calling PUT PublicAPI/REST/sessionUpload/{0} endpoint'.format(upload_id))
+            await asyncio.sleep(5)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
             payload = copy.copy(session_upload)
             payload['State'] = 1  # Upload Completed
