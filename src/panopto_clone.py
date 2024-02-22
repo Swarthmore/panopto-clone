@@ -152,9 +152,11 @@ async def main():
             progress.console.log(f'Saved files to upload cache', style='info')
 
             for file in files:
+                # total represents 100% of the upload
                 task_id = progress.add_task(f'{file}', total=100, visible=False)
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
+
                 # This will select the id of the first item in filtered_dict
                 if filtered_dict:
                     target_folder_id = next(iter(filtered_dict.values()))['Id']

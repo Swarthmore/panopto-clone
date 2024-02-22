@@ -12,21 +12,7 @@ from constants import CACHE_UPLOADED_FILES
 from utils import bytes_to_megabytes
 from boto3.s3.transfer import S3TransferConfig
 from botocore.config import Config
-
-# Size of each part of multipart upload.
-# This must be between 5MB and 25MB. Panopto server may fail if the size is more than 25MB.
-PART_SIZE = 25 * 1024 * 1024
-
-# Template for manifest XML file.
-MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
-
-# Filename of manifest XML file. Any filename is acceptable.
-MANIFEST_FILE_NAME = 'upload_manifest_generated.xml'
-
-# The max amount of time (in seconds) to monitor the processing stage of an upload.
-# 12 iterations = 1 minute
-# wait 5 minutes
-MAX_PROCESSING_POLL_TIME = 12 * 5
+from constants import MAX_PROCESSING_POLL_TIME, PART_SIZE, MANIFEST_FILE_TEMPLATE, MANIFEST_FILE_NAME, DELAY
 
 
 class PanoptoUploader:
@@ -68,7 +54,8 @@ class PanoptoUploader:
         # 401 - The user is not authorized to perform the requested action
         # 403 - User does not have permission to access this function
         if response.status == 401 or response.status == 403:
-            update_progress('[bold][yellow]Forbidden. This may mean token expired. Refreshing access token.[/yellow][/bold]')
+            update_progress(
+                '[bold][yellow]Forbidden. This may mean token expired. Refreshing access token.[/yellow][/bold]')
             self.__setup_or_refresh_access_token(session)  # Ensure this method is async and awaits the token refresh
             return True
 
@@ -146,7 +133,7 @@ class PanoptoUploader:
 
         def update_progress(msg, completed=None):
             # prefix the task id to the message
-            log_msg = f'[bold][{task_color}][{task_id}][/bold][/{task_color}] {msg}'
+            log_msg = f'[bold][{task_color}][{task_id}][/bold][/{task_color}] [dim]{msg}[/dim]'
             progress.console.log(log_msg)
             progress.update(
                 task_id,
@@ -188,7 +175,7 @@ class PanoptoUploader:
         # Mark the task as completed, and hide it
         progress.update(
             task_id,
-            completed=100,
+            completed=True,
             visible=False
         )
 
@@ -267,12 +254,13 @@ class PanoptoUploader:
         Create an upload session. Return sessionUpload object.
         """
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(DELAY)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload'
             payload = {'FolderId': folder_id}
             headers = {'content-type': 'application/json'}
             resp = await session.post(url=url, json=payload, ssl=self.ssl_verify, headers=headers)
-            if not await self.__inspect_response_is_retry_needed(session=session, response=resp, update_progress=update_progress):
+            if not await self.__inspect_response_is_retry_needed(session=session, response=resp,
+                                                                 update_progress=update_progress):
                 # print('Refreshing token')
                 break
         return await resp.json()
@@ -339,9 +327,9 @@ class PanoptoUploader:
                 try:
                     def progress(_bytes):
                         uploaded_mb = bytes_to_megabytes(_bytes)
-                        pct_complete = ceil((_bytes/file_size) * 100)
-                        update_progress(f'Uploaded {uploaded_mb:.2f}/{file_size_mb:.2f}Mb')
-                        progress.update(task_id, refresh=True, completed=round(pct_complete, 2))
+                        pct_complete = ceil((_bytes / file_size) * 100)
+                        update_progress(f'Uploaded [green][dim]{uploaded_mb:.2f}[/dim][/green]/[green]{file_size_mb:.2f}[/green]Mb')
+                        progress.update(task_id, refresh=True, percentage=round(pct_complete, 2))
 
                     transfer_config = S3TransferConfig(
                         multipart_chunksize=PART_SIZE
@@ -353,9 +341,7 @@ class PanoptoUploader:
                     upload_time = end_time - start_time
                     speed_mbps = (file_size / upload_time) / (1024 * 1024)  # Upload speed in MBps
 
-                    msg = f'Uploaded {file_size_mb}Mb \
-                    in {upload_time: .2f}s \
-                    with an average speed of {speed_mbps: .2f}MBps'
+                    msg = f'Uploaded [yellow]{os.path.basename(file_path)}[/yellow] ([green]{file_size_mb}Mb[/green]) in [blue]{upload_time: .2f}s[/blue] with an average speed of [orange]{speed_mbps: .2f}MBps[/orange]'
 
                     update_progress(msg)
 
@@ -364,80 +350,6 @@ class PanoptoUploader:
                 except Exception as e:
                     print(e)
                     update_progress(f'[bold][red]{str(e)}[/bold][/red]')
-
-            # try:
-            #     mpu = await s3.create_multipart_upload(Bucket=bucket, Key=object_key)
-            #     parts = []
-            #     part_number = 1
-            #     file_size = os.path.getsize(file_path)
-            #     file_size_mb = bytes_to_megabytes(file_size)
-            #     uploaded_bytes = 0
-            #     upload_start_time = time.perf_counter()
-            #
-            #     # Read and upload each part
-            #     with open(file_path, 'rb') as file:
-            #
-            #         while True:
-            #             data = file.read(PART_SIZE)
-            #             if not data:
-            #                 break
-            #
-            #             start_time = time.perf_counter()
-            #             part = await s3.upload_part(
-            #                 Bucket=bucket,
-            #                 Key=object_key,
-            #                 PartNumber=part_number,
-            #                 UploadId=mpu['UploadId'],
-            #                 Body=data
-            #             )
-            #             end_time = time.perf_counter()
-            #
-            #             parts.append({
-            #                 'PartNumber': part_number,
-            #                 'ETag': part['ETag']
-            #             })
-            #
-            #             part_number += 1
-            #             uploaded_bytes += len(data)
-            #             uploaded_mb = bytes_to_megabytes(uploaded_bytes)
-            #
-            #             upload_time = end_time - start_time  # Time taken to upload the part
-            #             speed_mbps = (len(data) / upload_time) / (1024 * 1024)  # Upload speed in MBps
-            #             elapsed_time = end_time - upload_start_time
-            #
-            #             pct_complete = ceil((uploaded_bytes / file_size) * 100)
-            #
-            #             msg_uploaded = f'[bright_yellow]{uploaded_mb:.2f}[bright_yellow][dim]/[/dim][yellow]{file_size_mb:.2f}[dim]Mb[/dim][/yellow]'
-            #             msg_speed = f'[cyan]{speed_mbps:.2f}[dim]MBps[/dim][/cyan]'
-            #             msg_elapsed = f'[green]{elapsed_time:.2f}[dim]s[/dim][/green]'
-            #             msg = f'{msg_uploaded} {msg_speed} {msg_elapsed}'
-            #
-            #             update_progress(
-            #                 msg,
-            #                 completed=pct_complete)
-            #
-            #             progress.update(task_id, refresh=True)
-            #             return
-            #
-            # except Exception as e:
-            #     error = str(e)
-            #     update_progress(f'[bold][red]{error}[/red][/bold]')
-            #     raise
-            #
-            # try:
-            #     # Complete the upload
-            #     await s3.complete_multipart_upload(
-            #         Bucket=bucket,
-            #         Key=object_key,
-            #         UploadId=mpu['UploadId'],
-            #         MultipartUpload={'Parts': parts}
-            #     )
-            #     update_progress(f'[dark_goldenrod][bold]Upload complete')
-            # except Exception as e:
-            #     error = str(e)
-            #     update_progress(f'[bold][red]{error}[/red][/bold]')
-            #     raise
-            #
 
     @staticmethod
     def __create_manifest_for_video(file_path, manifest_file_name):
@@ -467,7 +379,7 @@ class PanoptoUploader:
 
         while True:
             # print('Calling PUT PublicAPI/REST/sessionUpload/{0} endpoint'.format(upload_id))
-            await asyncio.sleep(5)
+            await asyncio.sleep(DELAY)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
             payload = copy.copy(session_upload)
             payload['State'] = 1  # Upload Completed
@@ -492,23 +404,31 @@ class PanoptoUploader:
                     update_progress("[red]Max polling time reached. Exiting...")
                     return
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(DELAY)
 
                 url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
                 resp = await session.get(url=url)
 
-                if await self.__inspect_response_is_retry_needed(response=resp, session=session, update_progress=update_progress):
+                if await self.__inspect_response_is_retry_needed(response=resp, session=session,
+                                                                 update_progress=update_progress):
                     # If we get Unauthorized and token is refreshed, ignore the response at this time and wait for next
                     # time.
                     continue
 
                 session_upload = await resp.json()
+                # See https://support.panopto.com/s/article/Upload-API for state property defs
+                state = ['Uploading', 'UploadComplete', 'UploadCancelled', 'Processing', 'Complete', 'ProcessingError',
+                         'DeletingFiles', 'Deleted', 'DeletingError']
+                key = session_upload['State']
+                session_state = state[key] if key < len(state) else 'Unknown'
+
                 update_progress('[dim]State: {0} [blue]Elapsed: {1}s'.format(
-                    session_upload['State'],
+                    session_state,
                     round(time.time() - start_time, 2)))
 
                 if session_upload['State'] == 4:  # Complete
-                    update_progress(f'[green]State: 4 - Finished in [blue][bold]{round(time.time() - start_time, 2)}[/bold][/blue]s')
+                    update_progress(
+                        f'[green]State: Finished in [blue][bold]{round(time.time() - start_time, 2)}[/bold][/blue]s')
                     break
 
         try:
@@ -516,4 +436,4 @@ class PanoptoUploader:
             await asyncio.wait_for(poll(), timeout=max_time)
 
         except asyncio.TimeoutError:
-            print("Polling operation timed out.")
+            update_progress(f"[bold][yellow]Polling operation timed out. This could be due to the size or format of the file. Panopto will still process the file.[/yellow][/bold]")
