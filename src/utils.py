@@ -21,7 +21,7 @@ def save_dict_to_disk(data_dict, file_path):
     :param data_dict: Dictionary to be saved.
     :param file_path: Path to the file where the dictionary will be saved.
     """
-    with open(file_path, 'wb') as file:
+    with open(file_path, 'wb', encoding='utf-8') as file:
         pickle.dump(data_dict, file)
 
 
@@ -32,7 +32,7 @@ def retrieve_dict_from_disk(file_path):
     :param file_path: Path to the file from which the dictionary will be retrieved.
     :return: The dictionary retrieved from the file.
     """
-    with open(file_path, 'rb') as file:
+    with open(file_path, 'rb', encoding='utf-8') as file:
         data_dict = pickle.load(file)
     return data_dict
 
@@ -48,7 +48,7 @@ def has_files(directory):
 
 
 def write_list_to_file(file_name, list_variable):
-    with open(file_name, 'w') as file:
+    with open(file_name, 'w', encoding='utf-8') as file:
         # Ensure each item ends with a newline character
         lines = [f"{item}\n" for item in list_variable]
         file.writelines(lines)
