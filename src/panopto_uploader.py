@@ -263,7 +263,7 @@ class PanoptoUploader:
             payload = {'FolderId': folder_id}
             headers = {'content-type': 'application/json'}
             resp = await session.post(url=url, json=payload, ssl=self.ssl_verify, headers=headers)
-            if not await self.__inspect_response_is_retry_needed(session=session, response=resp):
+            if not await self.__inspect_response_is_retry_needed(session=session, response=resp, update_progress=update_progress):
                 # print('Refreshing token')
                 break
         return await resp.json()
@@ -425,7 +425,7 @@ class PanoptoUploader:
             payload = copy.copy(session_upload)
             payload['State'] = 1  # Upload Completed
             resp = await session.put(url=url, json=payload)
-            if not await self.__inspect_response_is_retry_needed(response=resp, session=session):
+            if not await self.__inspect_response_is_retry_needed(response=resp, session=session, update_progress=update_progress):
                 break
 
     async def __monitor_progress(self, session, upload_id, max_time, update_progress):
@@ -449,7 +449,7 @@ class PanoptoUploader:
                 url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
                 resp = await session.get(url=url)
 
-                if await self.__inspect_response_is_retry_needed(response=resp, session=session):
+                if await self.__inspect_response_is_retry_needed(response=resp, session=session, update_progress=update_progress):
                     # If we get Unauthorized and token is refreshed, ignore the response at this time and wait for next
                     # time.
                     continue
