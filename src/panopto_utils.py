@@ -12,7 +12,7 @@ async def create_directory_skeleton(source_directory, uploader, session, progres
     for item in os.listdir(source_directory):
 
         # limit api rates
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         item_path = os.path.join(source_directory, item)
 
