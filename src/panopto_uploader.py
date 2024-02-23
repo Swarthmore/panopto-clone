@@ -46,7 +46,7 @@ class PanoptoUploader:
             # Success on 2xx response.
             return False
 
-        if response.code == 400:
+        if response.status == 400:
             # the request is bad
             update_progress('[bold][red]Bad request.[/red][/bold]')
             return False
