@@ -166,6 +166,8 @@ async def main():
                     progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
                                          style='danger')
 
+                task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
+
                 # Create the task
                 task = uploader.upload_video_with_progress(
                     folder_id=target_folder_id,
@@ -173,10 +175,9 @@ async def main():
                     progress=progress,
                     file_path=file,
                     task_id=task_id,
+                    task_color=task_color,
                     manifest_file_name=str(guid),
                     manifest_file_template=MANIFEST_FILE_TEMPLATE)
-
-                task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
 
                 tasks.append(task)
 
