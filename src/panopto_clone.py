@@ -156,7 +156,7 @@ async def main():
                 guid = uuid.uuid4()
 
                 # copy the manifest file template to guid
-                shutil.copyfile(MANIFEST_FILE_TEMPLATE, guid)
+                shutil.copyfile(MANIFEST_FILE_TEMPLATE, str(guid))
 
                 # This will select the id of the first item in filtered_dict
                 if filtered_dict:
@@ -173,7 +173,7 @@ async def main():
                     progress=progress,
                     file_path=file,
                     task_id=task_id,
-                    manifest_file_name=guid,
+                    manifest_file_name=str(guid),
                     manifest_file_template=MANIFEST_FILE_TEMPLATE)
 
                 task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
