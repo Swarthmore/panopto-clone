@@ -191,7 +191,7 @@ class PanoptoUploader:
         # step 3 - create manifest file and upload it
         update_progress("Creating manifest")
         self.__create_manifest_for_video(file_path, manifest_file_name)
-        await self.__multipart_upload_single_file_with_retry(upload_target, file_path=manifest_file_name,  progress, task_id, update_progress)
+        await self.__multipart_upload_single_file_with_retry(upload_target, progress, task_id, update_progress, file_path=manifest_file_name)
 
         # step 4 - finish the upload
         update_progress("Finishing upload")
