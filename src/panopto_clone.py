@@ -22,7 +22,7 @@ def parse_argument():
     """
     Argument definition and handling.
     """
-    parser = argparse.ArgumentParser(description='Upload a single video file to Panopto server')
+    parser = argparse.ArgumentParser(description='Upload a folder to Panopto')
 
     parser.add_argument('--server',
                         dest='server',
@@ -53,65 +53,24 @@ def parse_argument():
                         dest='skip_verify',
                         action='store_true',
                         required=False,
-                        help='Skip SSL certificate verification. (Never apply to the production code)')
-
-    parser.add_argument('--batch-size',
-                        dest='batch_size',
-                        required=False,
-                        help="How many files to sync at a time")
+                        help='(optional) Skip SSL certificate verification. (Never apply to the production code)')
 
     parser.add_argument('--manifest-template',
                         dest='manifest_template',
                         required=False,
-                        help="Absolute path to manifest template")
-
-    parser.add_argument('--server',
-                        dest='server',
-                        required=True,
-                        help='Server name as FQDN')
-
-    parser.add_argument('--destination',
-                        dest='destination',
-                        required=True,
-                        help='ID of target Panopto folder')
-
-    parser.add_argument('--source',
-                        dest='source',
-                        required=True,
-                        help='Absolute path to source folder')
-
-    parser.add_argument('--client-id',
-                        dest='client_id',
-                        required=True,
-                        help='Client ID of OAuth2 client')
-
-    parser.add_argument('--client-secret',
-                        dest='client_secret',
-                        required=True,
-                        help='Client Secret of OAuth2 client')
-
-    parser.add_argument('--skip-verify',
-                        dest='skip_verify',
-                        action='store_true',
-                        required=False,
-                        help='Skip SSL certificate verification. (Never apply to the production code)')
-
-    parser.add_argument('--batch-size',
-                        dest='batch_size',
-                        required=False,
-                        help="How many files to sync at a time")
+                        help="(optional, default=src/upload_manifest_template.xml) Absolute path to manifest template")
 
     parser.add_argument("--clean",
                         dest="clean",
                         action='store_true',
                         required=False,
-                        help="Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.")
+                        help="(optional) Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.")
 
     parser.add_argument("--max-concurrent-tasks",
                         dest="max_concurrent_tasks",
                         default=5,
                         required=False,
-                        help="How many uploads should occur concurrently.")
+                        help="(optional, default=5) How many uploads should occur concurrently.")
 
     return parser.parse_args()
 
@@ -200,7 +159,6 @@ async def main():
 
                 # copy the manifest file template
                 shutil.copyfile(MANIFEST_FILE_TEMPLATE, manifest)
-
                 print(f'Copied manifest to {manifest}')
 
                 # This will select the id of the first item in filtered_dict
@@ -211,6 +169,8 @@ async def main():
                     progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
                                          style='danger')
 
+                task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
+
                 # Create the task
                 task = uploader.upload_video_with_progress(
                     folder_id=target_folder_id,
@@ -218,16 +178,8 @@ async def main():
                     progress=progress,
                     file_path=file,
                     task_id=task_id,
+                    task_color=task_color,
                     manifest_file_name=manifest)
-
-                    task_color=random.choice(['blue',
-                                              'bright_blue',
-                                              'magenta',
-                                              'bright_magenta',
-                                              'cyan',
-                                              'bright_cyan',
-                                              'white',
-                                              'bright_black']))
 
                 tasks.append(task)
 
