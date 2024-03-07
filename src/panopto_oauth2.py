@@ -1,15 +1,13 @@
 #!python3
 import os
-import time
-import json
-import requests
-from requests_oauthlib import OAuth2Session
-from oauthlib.oauth2 import LegacyApplicationClient  # specific to Resource Owner Grant
 import pickle
-import pprint
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
+
+from oauthlib.oauth2 import LegacyApplicationClient  # specific to Resource Owner Grant
+from requests_oauthlib import OAuth2Session
 
 # This code uses this local URL as redirect target for Authorization Code Grant (Server-side Web Application)
 REDIRECT_URL = 'http://localhost:9127/redirect'
@@ -37,7 +35,7 @@ class PanoptoOAuth2:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
     def get_access_token_authorization_code_grant(self):
-        '''
+        """
         Get OAuth2 access token by Authorization Code Grant (Server-side Web Application).
 
         This method initially tries to get a new access token from refresh token.
@@ -48,14 +46,14 @@ class PanoptoOAuth2:
          3. When the redirect is received, HTTP server exits.
          4. To get access token and refresh token with given authentication code by redirection.
          5. Save the token object, which includes refersh_token, for later refrehsh operation.
-        '''
+        """
 
         # First, try getting a new access token from refesh token.
         access_token = self.__get_refreshed_access_token()
         if access_token:
             return access_token
 
-        # Then, fallback to the full autorization path. Offline access scope is needed to get refresh token.
+        # Then, fallback to the full authorization path. Offline access scope is needed to get refresh token.
         scope = list(DEFAULT_SCOPE) + ['offline_access']
         session = OAuth2Session(self.client_id, scope=scope, redirect_uri=REDIRECT_URL)
 
@@ -86,12 +84,12 @@ class PanoptoOAuth2:
         return session.token['access_token']
 
     def __get_refreshed_access_token(self):
-        '''
+        """
         Private method of the class.
         Get a new access token from refresh token.
         Save the updated token object, which includes refersh_token, for later refrehsh operation.
         Returning None if failing to get the new access token with any reason.
-        '''
+        """
         try:
             # print()
             # print('Read cached token from {0}'.format(self.cache_file))
@@ -110,23 +108,23 @@ class PanoptoOAuth2:
 
         # Catch any failures (exceptions) and return with None.
         except Exception as e:
-            print('Failed to refresh access token: ' + str(e))
+            # print('Failed to refresh access token: ' + str(e))
             return None
 
     def __save_token_to_cache(self, token):
-        '''
+        """
         Private method of the class.
         Save entire token object from oauthlib (not just refresh token).
-        '''
+        """
         with open(self.cache_file, 'wb') as fw:
             pickle.dump(token, fw)
         # print('OAuth2 flow provided the token below. Cache it to {0}'.format(self.cache_file))
         # pprint.pprint(token, indent=4)
 
     def get_access_token_resource_owner_grant(self, username, password):
-        '''
+        """
         Get OAuth2 access token by Resource Owner Grant (User Based Server Application).
-        '''
+        """
         session = OAuth2Session(client=LegacyApplicationClient(client_id=self.client_id))
 
         # Retrieve access token
@@ -144,11 +142,11 @@ class PanoptoOAuth2:
 
 
 class RedirectTCPServer(ThreadingTCPServer):
-    '''
+    """
     A helper class for Authorization Code Grant.
     Custom class of ThreadingTCPServer with RedirectHandler class as handler.
     last_get_path property is set whenever GET method is called by the handler.
-    '''
+    """
 
     def __init__(self):
         # Class property, representing the path of the most recent GET call.
@@ -160,14 +158,14 @@ class RedirectTCPServer(ThreadingTCPServer):
 
 
 class RedirectHandler(BaseHTTPRequestHandler):
-    '''
+    """
     A helper class for Authorization Code Grant.
-    '''
+    """
 
     def do_GET(self):
-        '''
+        """
         Handle a GET request. Set the path to the server's property.
-        '''
+        """
         self.server.last_get_path = self.path
         self.send_response(200)
         self.send_header('Content-type', 'text/html')

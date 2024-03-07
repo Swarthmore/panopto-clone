@@ -1,5 +1,7 @@
 import asyncio
 import os
+import random
+from math import ceil
 import aiohttp
 import codecs
 import time
@@ -8,9 +10,11 @@ import copy
 import aioboto3
 import math
 
-# Size of each part of multipart upload.
-# This must be between 5MB and 25MB. Panopto server may fail if the size is more than 25MB.
-PART_SIZE = 25 * 1024 * 1024
+from constants import CACHE_UPLOADED_FILES
+from utils import bytes_to_megabytes
+from boto3.s3.transfer import S3TransferConfig
+from botocore.config import Config
+from constants import MAX_PROCESSING_POLL_TIME, PART_SIZE, MANIFEST_FILE_TEMPLATE, MANIFEST_FILE_NAME, DELAY
 
 
 class PanoptoUploader:
@@ -33,29 +37,39 @@ class PanoptoUploader:
         access_token = self.oauth2.get_access_token_authorization_code_grant()
         session.headers.update({'Authorization': 'Bearer ' + access_token})
 
-    async def __inspect_response_is_retry_needed(self, session, response):
+    async def __inspect_response_is_retry_needed(self, session, response, update_progress):
         """
         Inspect the response of an aiohttp call.
         True indicates the retry needed, False indicates success. Otherwise, an exception is thrown.
 
         This method detects 403 (Forbidden), refreshes the access token, and returns as 'is retry needed'.
         """
-        if response.status == 200:
+        if response.status == 200 or response.status == 201:
             # Success on 2xx response.
             return False
 
-        if response.status == 403:
-            # print('Forbidden. This may mean token expired. Refreshing access token.')
+        if response.status == 400:
+            # the request is bad
+            update_progress('[bold][red]Bad request.[/red][/bold]')
+            return False
+
+        # 401 - The user is not authorized to perform the requested action
+        # 403 - User does not have permission to access this function
+        if response.status == 401 or response.status == 403:
+            update_progress(
+                '[bold][yellow]Forbidden. This may mean token expired. Refreshing access token.[/yellow][/bold]')
             self.__setup_or_refresh_access_token(session)  # Ensure this method is async and awaits the token refresh
             return True
 
         # For aiohttp, use response.raise_for_status() to automatically throw if the status is an error code
         # Make sure to use it where it doesn't preempt your checks for recoverable error codes like 403
         try:
+            update_progress(f'[bold][red]Received response status {response.status}[/red][/bold]')
             response.raise_for_status()
         except aiohttp.ClientError as e:
             # Handle specific aiohttp exceptions or re-raise
             # This is where you might log the error or handle specific HTTP errors differently
+            update_progress(f'[bold][red]{e}[/red][/bold]')
             raise e
 
         # If you've gotten here, it means neither 200 nor 403 status, and raise_for_status didn't trigger an exception
@@ -68,8 +82,16 @@ class PanoptoUploader:
         """
         try:
             url = f'https://{self.server}/Panopto/api/v1/folders'
-            payload = {'Name': folder_name, 'Description': folder_description, 'Parent': folder_id}
-            res = await session.post(url, json=payload, ssl=self.ssl_verify)
+
+            payload = {
+                'Name': folder_name,
+                'Description': folder_description,
+                'Parent': folder_id}
+
+            res = await session.post(
+                url,
+                json=payload,
+                ssl=self.ssl_verify)
 
             if res.status == 200:
                 return await res.json()
@@ -92,8 +114,13 @@ class PanoptoUploader:
         """
         try:
             url = f'https://{self.server}/Panopto/api/v1/folders/{folder_id}/children?sortField={sort_field}&sortOrder={sort_order}&pageNumber={page_number}'
-            res = await session.get(url, ssl=self.ssl_verify)
+
+            res = await session.get(
+                url,
+                ssl=self.ssl_verify)
+
             return await res.json()
+
         except aiohttp.ClientResponseError as e:
             # Handle client response errors (e.g., 404, 403, 500)
             print(f'HTTP Error: {e}')
@@ -104,16 +131,48 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id, manifest_file_name, manifest_file_template):
+    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id, task_color, manifest_file_name, manifest_file_template):
+
         def update_progress(msg, completed=None):
-            progress.console.log(f"[bold][{task_id}][/bold] [dim]{os.path.basename(file_path)}->{folder_id}[/dim] {msg}")  # Log the current step
-            progress.update(task_id, visible=True)
+            # prefix the task id to the message
+            log_msg = f'[bold][{task_color}][{task_id}][/bold][/{task_color}] [dim]{msg}[/dim]'
+            progress.console.log(log_msg)
+            progress.update(
+                task_id,
+                visible=True
+            )
             # Optionally, update the task's progress bar here
             if completed:
-                progress.update(task_id, completed=completed)
+                progress.update(
+                    task_id,
+                    completed=completed
+                )
 
         await self.upload_video(session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template)
-        progress.update(task_id, completed=100)  # Mark the task as completed
+
+        # Write the file path, folder location, and other stats to disk
+        try:
+            with open(CACHE_UPLOADED_FILES, 'a', encoding='utf-8') as file:
+                line = f'"{task_id}","{file_path}","{folder_id}"\n'
+                file.write(line)
+        except FileNotFoundError:
+            # Handle case when the cache file does not exist
+            with open(CACHE_UPLOADED_FILES, 'w', encoding='utf-8') as file:
+                # Write the header line before anything else
+                lines = [
+                    '"task_id","file_path","folder_id"\n',
+                    f'"{task_id}","{file_path}","{folder_id}"\n'
+                ]
+                file.writelines(lines)
+
+        update_progress(f'[bold][green]Finished uploading[/green][/bold]')
+
+        # Mark the task as completed, and hide it
+        progress.update(
+            task_id,
+            completed=True,
+            visible=False
+        )
 
     async def upload_video(self, session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template):
         """
@@ -121,13 +180,23 @@ class PanoptoUploader:
         """
         # step 1 - Create a session
         update_progress("Creating session")
-        session_upload = await self.__create_session(session=session, folder_id=folder_id)
+        session_upload = await self.__create_session(
+            session=session,
+            folder_id=folder_id,
+            update_progress=update_progress
+        )
         upload_id = session_upload['ID']
         upload_target = session_upload['UploadTarget']
 
         # step 2 - upload the video file
         update_progress("Uploading file")
-        await self.__multipart_upload_single_file(upload_target=upload_target, file_path=file_path, progress=progress, task_id=task_id, update_progress=update_progress)
+        await self.__multipart_upload_single_file_with_retry(
+            upload_target=upload_target,
+            file_path=file_path,
+            progress=progress,
+            task_id=task_id,
+            update_progress=update_progress
+        )
 
         # step 3 - create manifest file and upload it
         update_progress("Creating manifest")
@@ -136,11 +205,20 @@ class PanoptoUploader:
 
         # step 4 - finish the upload
         update_progress("Finishing upload")
-        await self.__finish_upload(session_upload=session_upload, session=session, update_progress=update_progress)
+        await self.__finish_upload(
+            session_upload=session_upload,
+            session=session,
+            update_progress=update_progress
+        )
 
         # step 5 - monitor the progress of processing
         update_progress("Monitoring Panopto processing")
-        await self.__monitor_progress(upload_id=upload_id, session=session, update_progress=update_progress, max_time=300)
+        await self.__monitor_progress(
+            upload_id=upload_id,
+            session=session,
+            update_progress=update_progress,
+            max_time=MAX_PROCESSING_POLL_TIME
+        )
 
         # step 6 - clean up manifest
         os.unlink(manifest_file_name)
@@ -160,25 +238,58 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def __create_session(self, session, folder_id):
+    async def __create_session(self, session, folder_id, update_progress):
         """
         Create an upload session. Return sessionUpload object.
         """
         while True:
+            await asyncio.sleep(DELAY)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload'
             payload = {'FolderId': folder_id}
             headers = {'content-type': 'application/json'}
             resp = await session.post(url=url, json=payload, ssl=self.ssl_verify, headers=headers)
-            if not await self.__inspect_response_is_retry_needed(session=session, response=resp):
+            if not await self.__inspect_response_is_retry_needed(session=session, response=resp,
+                                                                 update_progress=update_progress):
                 # print('Refreshing token')
                 break
         return await resp.json()
+
+    async def __multipart_upload_single_file_with_retry(self, upload_target, file_path, task_id, progress,
+                                                        update_progress=None):
+        retry_count = 0
+        max_retries = 3
+        base_delay = 1  # Base delay in seconds
+
+        while True:
+            try:
+                # Attempt the operation
+                await self.__multipart_upload_single_file(upload_target, file_path, task_id, progress, update_progress)
+                break  # If successful, exit the loop
+            except Exception as e:
+                # Check if it's a retryable error
+                if retry_count >= max_retries:
+                    # If max retries exceeded, raise the error
+                    update_progress(f"[bold][red]Retry limit of {max_retries} reached[/red][/bold]")
+                    raise e
+                else:
+                    # Increment retry count
+                    retry_count += 1
+
+                    # Calculate exponential backoff with jitter
+                    delay = base_delay * 2 ** retry_count + random.uniform(0, 1)
+
+                    # Log the retry attempt
+                    update_progress(f"[bold][yellow]Retry attempt {retry_count} after {delay} seconds[/yellow][/bold]")
+
+                    # Wait for the calculated delay before retrying
+                    await asyncio.sleep(delay)
 
     async def __multipart_upload_single_file(self, upload_target, file_path, task_id, progress, update_progress=None):
 
         # Upload target which is returned by sessionUpload API consists of:
         # https://{service endpoint}/{bucket}/{prefix}
         # where {bucket} and {prefix} are single element (without delimiter) individually.
+        workers = 20
         elements = upload_target.split('/')
         endpoint_url = '/'.join(elements[:-2])
         bucket = elements[-2]
@@ -187,58 +298,47 @@ class PanoptoUploader:
 
         session = aioboto3.Session()
 
-        async with session.client("s3", endpoint_url=endpoint_url, verify=self.ssl_verify, use_ssl=True,
-                                  aws_access_key_id="wow", aws_secret_access_key="wow") as s3:
+        botocore_config = Config(max_pool_connections=workers)
 
-            mpu = await s3.create_multipart_upload(Bucket=bucket, Key=object_key)
-            parts = []
-            part_number = 1
-            file_size = os.path.getsize(file_path)
-            total_parts = math.ceil(file_size / PART_SIZE)
-            uploaded_bytes = 0
+        async with session.client("s3",
+                                  endpoint_url=endpoint_url,
+                                  verify=self.ssl_verify,
+                                  use_ssl=True,
+                                  aws_access_key_id="wow",
+                                  aws_secret_access_key="wow",
+                                  config=botocore_config) as s3:
 
-            # Read and upload each part
-            # print(f'Opening {file_path} {file_size_in_mb} mb')
             with open(file_path, 'rb') as file:
 
-                while True:
-                    data = file.read(PART_SIZE)
-                    if not data:
-                        break
+                file_size = os.path.getsize(file_path)
+                file_size_mb = bytes_to_megabytes(file_size)
 
-                    start_time = time.perf_counter()
-                    part = await s3.upload_part(
-                        Bucket=bucket,
-                        Key=object_key,
-                        PartNumber=part_number,
-                        UploadId=mpu['UploadId'],
-                        Body=data
+                try:
+                    def progress(_bytes):
+                        uploaded_mb = bytes_to_megabytes(_bytes)
+                        pct_complete = ceil((_bytes / file_size) * 100)
+                        update_progress(f'Uploaded [green][dim]{uploaded_mb:.2f}[/dim][/green]/[green]{file_size_mb:.2f}[/green]Mb')
+                        progress.update(task_id, refresh=True, percentage=round(pct_complete, 2))
+
+                    transfer_config = S3TransferConfig(
+                        multipart_chunksize=PART_SIZE
                     )
+                    start_time = time.perf_counter()
+                    await s3.upload_fileobj(file, Bucket=bucket, Key=object_key, Callback=progress,
+                                            Config=transfer_config)
                     end_time = time.perf_counter()
+                    upload_time = end_time - start_time
+                    speed_mbps = (file_size / upload_time) / (1024 * 1024)  # Upload speed in MBps
 
-                    parts.append({
-                        'PartNumber': part_number,
-                        'ETag': part['ETag']
-                    })
-                    part_number += 1
-                    uploaded_bytes += len(data)
+                    msg = f'Uploaded [yellow]{os.path.basename(file_path)}[/yellow] ([green]{file_size_mb}Mb[/green]) in [blue]{upload_time: .2f}s[/blue] with an average speed of [orange]{speed_mbps: .2f}MBps[/orange]'
 
-                    upload_time = end_time - start_time  # Time taken to upload the part
-                    speed_mbps = (len(data) / upload_time) / (1024 * 1024)  # Upload speed in MBps
+                    update_progress(msg)
 
-                    pct_complete = round((uploaded_bytes / file_size) * 100, 2)
-                    update_progress(f'[blue]Elapsed: {upload_time:.2f} [yellow]Speed: {speed_mbps:.2f} MBps [red]Uploaded: {uploaded_bytes}b [green]Part: {part_number}/{total_parts}', completed=pct_complete)
-                    progress.update(task_id, refresh=True)
+                    return
 
-            # Complete the upload
-            await s3.complete_multipart_upload(
-                Bucket=bucket,
-                Key=object_key,
-                UploadId=mpu['UploadId'],
-                MultipartUpload={'Parts': parts}
-            )
-            update_progress(f'[dark_goldenrod][bold]Upload complete')
-
+                except Exception as e:
+                    print(e)
+                    update_progress(f'[bold][red]{str(e)}[/bold][/red]')
 
     @staticmethod
     def __create_manifest_for_video(file_path, manifest_file_name, manifest_file_template):
@@ -267,12 +367,13 @@ class PanoptoUploader:
 
         while True:
             # print('Calling PUT PublicAPI/REST/sessionUpload/{0} endpoint'.format(upload_id))
+            await asyncio.sleep(DELAY)
             url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
             payload = copy.copy(session_upload)
             payload['State'] = 1  # Upload Completed
             resp = await session.put(url=url, json=payload)
-            if not await self.__inspect_response_is_retry_needed(response=resp, session=session):
-                update_progress(f'[bold][green]Finished uploading to {upload_target}')
+            if not await self.__inspect_response_is_retry_needed(response=resp, session=session,
+                                                                 update_progress=update_progress):
                 break
 
     async def __monitor_progress(self, session, upload_id, max_time, update_progress):
@@ -291,23 +392,36 @@ class PanoptoUploader:
                     update_progress("[red]Max polling time reached. Exiting...")
                     return
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(DELAY)
 
                 url = f'https://{self.server}/Panopto/PublicAPI/REST/sessionUpload/{upload_id}'
                 resp = await session.get(url=url)
-                if await self.__inspect_response_is_retry_needed(response=resp, session=session):
+
+                if await self.__inspect_response_is_retry_needed(response=resp, session=session,
+                                                                 update_progress=update_progress):
                     # If we get Unauthorized and token is refreshed, ignore the response at this time and wait for next
                     # time.
                     continue
+
                 session_upload = await resp.json()
-                update_progress('[green]State: {0} [blue]Elapsed: {1}s'.format(session_upload['State'], round(time.time() - start_time, 2)))
+                # See https://support.panopto.com/s/article/Upload-API for state property defs
+                state = ['Uploading', 'UploadComplete', 'UploadCancelled', 'Processing', 'Complete', 'ProcessingError',
+                         'DeletingFiles', 'Deleted', 'DeletingError']
+                key = session_upload['State']
+                session_state = state[key] if key < len(state) else 'Unknown'
+
+                update_progress('[dim]State: {0} [blue]Elapsed: {1}s'.format(
+                    session_state,
+                    round(time.time() - start_time, 2)))
 
                 if session_upload['State'] == 4:  # Complete
-                    update_progress(f'[green][bold]State: 4 - Finished!')
+                    update_progress(
+                        f'[green]State: Finished in [blue][bold]{round(time.time() - start_time, 2)}[/bold][/blue]s')
                     break
 
         try:
             # Enforce the max_time for the polling operation
             await asyncio.wait_for(poll(), timeout=max_time)
+
         except asyncio.TimeoutError:
-            print("Polling operation timed out.")
+            update_progress(f"[bold][yellow]Polling operation timed out. This could be due to the size or format of the file. Panopto will still process the file.[/yellow][/bold]")

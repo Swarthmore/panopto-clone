@@ -1,8 +1,8 @@
+import asyncio
 import os
-from utils import has_files
 
 
-async def create_directory_skeleton(source_directory, uploader, session, created_folders=None, parent_folder_id=None):
+async def create_directory_skeleton(source_directory, uploader, session, progress, created_folders=None, parent_folder_id=None):
     """
     Create folders in Panopto that match the local tree (empty folders are not created)
     """
@@ -10,6 +10,9 @@ async def create_directory_skeleton(source_directory, uploader, session, created
         created_folders = {}
 
     for item in os.listdir(source_directory):
+
+        # limit api rates
+        await asyncio.sleep(1)
 
         item_path = os.path.join(source_directory, item)
 
@@ -26,6 +29,7 @@ async def create_directory_skeleton(source_directory, uploader, session, created
                 folder_name=os.path.basename(item_path),
                 folder_description="Created by panopto_clone.py",
                 session=session)
+            progress.console.log(f'Created {folder["Name"]}', style='info')
             created_folders[fp] = folder
 
             # Recurse into the directory after creating it in Panopto
@@ -34,6 +38,7 @@ async def create_directory_skeleton(source_directory, uploader, session, created
                 uploader=uploader,
                 session=session,
                 parent_folder_id=folder['Id'],
-                created_folders=created_folders)
+                created_folders=created_folders,
+                progress=progress)
 
     return created_folders
