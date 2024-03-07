@@ -131,7 +131,7 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id, task_color, manifest_file_name, manifest_file_template):
+    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id, task_color, manifest_file_name):
 
         def update_progress(msg, completed=None):
             # prefix the task id to the message
@@ -148,7 +148,7 @@ class PanoptoUploader:
                     completed=completed
                 )
 
-        await self.upload_video(session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template)
+        await self.upload_video(session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name)
 
         # Write the file path, folder location, and other stats to disk
         try:
@@ -174,51 +174,32 @@ class PanoptoUploader:
             visible=False
         )
 
-    async def upload_video(self, session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template):
+    async def upload_video(self, session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name):
         """
         Main upload method to go through all required steps.
         """
         # step 1 - Create a session
         update_progress("Creating session")
-        session_upload = await self.__create_session(
-            session=session,
-            folder_id=folder_id,
-            update_progress=update_progress
-        )
+        session_upload = await self.__create_session(session, folder_id, update_progress)
         upload_id = session_upload['ID']
         upload_target = session_upload['UploadTarget']
 
         # step 2 - upload the video file
         update_progress("Uploading file")
-        await self.__multipart_upload_single_file_with_retry(
-            upload_target=upload_target,
-            file_path=file_path,
-            progress=progress,
-            task_id=task_id,
-            update_progress=update_progress
-        )
+        await self.__multipart_upload_single_file_with_retry(upload_target, file_path, progress, task_id, update_progress)
 
         # step 3 - create manifest file and upload it
         update_progress("Creating manifest")
-        self.__create_manifest_for_video(file_path, manifest_file_name, manifest_file_template)
-        await self.__multipart_upload_single_file(upload_target, file_path=manifest_file_name,  progress=progress, task_id=task_id, update_progress=update_progress)
+        self.__create_manifest_for_video(file_path, manifest_file_name)
+        await self.__multipart_upload_single_file_with_retry(upload_target, file_path=manifest_file_name,  progress, task_id, update_progress)
 
         # step 4 - finish the upload
         update_progress("Finishing upload")
-        await self.__finish_upload(
-            session_upload=session_upload,
-            session=session,
-            update_progress=update_progress
-        )
+        await self.__finish_upload(session_upload, session, update_progress)
 
         # step 5 - monitor the progress of processing
         update_progress("Monitoring Panopto processing")
-        await self.__monitor_progress(
-            upload_id=upload_id,
-            session=session,
-            update_progress=update_progress,
-            max_time=MAX_PROCESSING_POLL_TIME
-        )
+        await self.__monitor_progress(upload_id, session, update_progress, max_time=MAX_PROCESSING_POLL_TIME)
 
         # step 6 - clean up manifest
         os.unlink(manifest_file_name)
@@ -341,20 +322,21 @@ class PanoptoUploader:
                     update_progress(f'[bold][red]{str(e)}[/bold][/red]')
 
     @staticmethod
-    def __create_manifest_for_video(file_path, manifest_file_name, manifest_file_template):
+    def __create_manifest_for_video(file_path, manifest_file_name):
         """
         Create manifest XML file for a single video file, based on template.
         """
 
         file_name = os.path.basename(file_path)
 
-        with open(manifest_file_template) as fr:
+        with open(manifest_file_name) as fr:
             template = fr.read()
         content = template \
             .replace('{Title}', file_name) \
             .replace('{Description}', 'This is a video session with the uploaded video file {0}'.format(file_name)) \
             .replace('{Filename}', file_name) \
             .replace('{Date}', datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f-00:00'))
+
         with codecs.open(manifest_file_name, 'w', 'utf-8') as fw:
             fw.write(content)
 

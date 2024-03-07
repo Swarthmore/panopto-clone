@@ -192,12 +192,16 @@ async def main():
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
 
                 MANIFEST_FILE_TEMPLATE = args.manifest_template if args.manifest_template else 'src/upload_manifest_template.xml'
+                print(f'Using manifest template: {MANIFEST_FILE_TEMPLATE}')
 
                 # create a unique id for the files to prevent collisions
                 guid = uuid.uuid4()
+                manifest = f'.cache/{guid}'
 
-                # copy the manifest file template to guid
-                shutil.copyfile(MANIFEST_FILE_TEMPLATE, guid)
+                # copy the manifest file template
+                shutil.copyfile(MANIFEST_FILE_TEMPLATE, manifest)
+
+                print(f'Copied manifest to {manifest}')
 
                 # This will select the id of the first item in filtered_dict
                 if filtered_dict:
@@ -214,8 +218,7 @@ async def main():
                     progress=progress,
                     file_path=file,
                     task_id=task_id,
-                    manifest_file_name=guid,
-                    manifest_file_template=MANIFEST_FILE_TEMPLATE)
+                    manifest_file_name=manifest)
 
                     task_color=random.choice(['blue',
                                               'bright_blue',
