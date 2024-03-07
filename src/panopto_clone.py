@@ -10,6 +10,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress
 import os
+import shutil
+import uuid
 
 
 def parse_argument():
@@ -26,6 +28,9 @@ def parse_argument():
                         help='Skip SSL certificate verification. (Never apply to the production code)')
     parser.add_argument('--batch-size', dest='batch_size', required=False,
                         help="How many files to sync at a time")
+    parser.add_argument('--manifest-template', dest='manifest_template', required=False,
+                        help="Absolute path to manifest template")
+
     return parser.parse_args()
 
 
@@ -81,20 +86,27 @@ async def main():
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
 
-                # if there is more than one entry, have the user select
-                # if len(filtered_dict) > 1:
-                    # target_folder_id = input("Enter the key of the folder you want to upload to")
-                # elif not filtered_dict:
-                #     target_folder_id = args.destination
-                # else:
+                MANIFEST_FILE_TEMPLATE = args.manifest_template if args.manifest_template else 'src/upload_manifest_template.xml'
+
+                # create a unique id for the files to prevent collisions
+                guid = uuid.uuid4()
+
+                # copy the manifest file template to guid
+                shutil.copyfile(MANIFEST_FILE_TEMPLATE, guid)
+
                 target_folder_id = next(iter(filtered_dict.values()))['Id']
 
+                # Create the task
                 task = uploader.upload_video_with_progress(
                     folder_id=target_folder_id,
                     session=session,
                     progress=progress,
                     file_path=file,
-                    task_id=task_id)
+                    task_id=task_id,
+                    manifest_file_name=guid,
+                    manifest_file_template=MANIFEST_FILE_TEMPLATE)
+
+                # Add the task
                 tasks.append(task)
 
             progress.console.log(f'[grey62]Scheduled {len(tasks)} upload tasks')

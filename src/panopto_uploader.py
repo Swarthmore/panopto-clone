@@ -12,12 +12,6 @@ import math
 # This must be between 5MB and 25MB. Panopto server may fail if the size is more than 25MB.
 PART_SIZE = 25 * 1024 * 1024
 
-# Template for manifest XML file.
-MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
-
-# Filename of manifest XML file. Any filename is acceptable.
-MANIFEST_FILE_NAME = 'upload_manifest_generated.xml'
-
 
 class PanoptoUploader:
     def __init__(self, server, ssl_verify, oauth2):
@@ -110,7 +104,7 @@ class PanoptoUploader:
             # Handle other errors (e.g., from JSON parsing)
             print(f'Unexpected Error: {e}')
 
-    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id):
+    async def upload_video_with_progress(self, session, folder_id, file_path, progress, task_id, manifest_file_name, manifest_file_template):
         def update_progress(msg, completed=None):
             progress.console.log(f"[bold][{task_id}][/bold] [dim]{os.path.basename(file_path)}->{folder_id}[/dim] {msg}")  # Log the current step
             progress.update(task_id, visible=True)
@@ -118,11 +112,10 @@ class PanoptoUploader:
             if completed:
                 progress.update(task_id, completed=completed)
 
-        await self.upload_video(session, file_path, folder_id, progress=progress, task_id=task_id,
-                                update_progress=update_progress)
+        await self.upload_video(session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template)
         progress.update(task_id, completed=100)  # Mark the task as completed
 
-    async def upload_video(self, session, file_path, folder_id, progress, task_id, update_progress):
+    async def upload_video(self, session, file_path, folder_id, progress, task_id, update_progress, manifest_file_name, manifest_file_template):
         """
         Main upload method to go through all required steps.
         """
@@ -138,8 +131,8 @@ class PanoptoUploader:
 
         # step 3 - create manifest file and upload it
         update_progress("Creating manifest")
-        self.__create_manifest_for_video(file_path, MANIFEST_FILE_NAME)
-        await self.__multipart_upload_single_file(upload_target, file_path=MANIFEST_FILE_NAME,  progress=progress, task_id=task_id, update_progress=update_progress)
+        self.__create_manifest_for_video(file_path, manifest_file_name, manifest_file_template)
+        await self.__multipart_upload_single_file(upload_target, file_path=manifest_file_name,  progress=progress, task_id=task_id, update_progress=update_progress)
 
         # step 4 - finish the upload
         update_progress("Finishing upload")
@@ -148,6 +141,9 @@ class PanoptoUploader:
         # step 5 - monitor the progress of processing
         update_progress("Monitoring Panopto processing")
         await self.__monitor_progress(upload_id=upload_id, session=session, update_progress=update_progress, max_time=300)
+
+        # step 6 - clean up manifest
+        os.unlink(manifest_file_name)
 
     async def find_folder(self, session, search_query):
         try:
@@ -245,15 +241,14 @@ class PanoptoUploader:
 
 
     @staticmethod
-    def __create_manifest_for_video(file_path, manifest_file_name):
+    def __create_manifest_for_video(file_path, manifest_file_name, manifest_file_template):
         """
         Create manifest XML file for a single video file, based on template.
         """
-        # print('Writing manifest file: {0}'.format(manifest_file_name))
 
         file_name = os.path.basename(file_path)
 
-        with open(MANIFEST_FILE_TEMPLATE) as fr:
+        with open(manifest_file_template) as fr:
             template = fr.read()
         content = template \
             .replace('{Title}', file_name) \
