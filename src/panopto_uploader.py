@@ -320,7 +320,6 @@ class PanoptoUploader:
 
                 try:
                     def progress_cb(uploaded_bytes):
-                        print(f'Uploaded {uploaded_bytes}b')
                         progress.advance(upload_progress_task, advance=uploaded_bytes)
 
                     transfer_config = S3TransferConfig(multipart_chunksize=PART_SIZE)

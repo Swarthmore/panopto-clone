@@ -147,7 +147,8 @@ async def main():
             for file in files:
 
                 # total = 6 steps to complete
-                task_id = progress.add_task(f'{file}', total=6, visible=False)
+                task_id = progress.add_task(f'Process {os.path.basename(file)}', total=6, visible=False)
+
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
 
