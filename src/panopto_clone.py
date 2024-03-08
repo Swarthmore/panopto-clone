@@ -145,13 +145,13 @@ async def main():
             progress.console.log(f'Saved files to upload cache', style='info')
 
             for file in files:
-                # total represents 100% of the upload
-                task_id = progress.add_task(f'{file}', total=100, visible=False)
+
+                # total = 6 steps to complete
+                task_id = progress.add_task(f'{file}', total=6, visible=False)
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
 
                 MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
-                print(f'Using manifest template: {MANIFEST_FILE_TEMPLATE}')
 
                 # create a unique id for the files to prevent collisions
                 guid = uuid.uuid4()
@@ -159,18 +159,18 @@ async def main():
 
                 # copy the manifest file template
                 shutil.copyfile(MANIFEST_FILE_TEMPLATE, manifest)
-                print(f'Copied manifest to {manifest}')
-
-                print(f'{file} -> {manifest}')
 
                 # This will select the id of the first item in filtered_dict
                 if filtered_dict:
                     target_folder_id = next(iter(filtered_dict.values()))['Id']
                 else:
                     target_folder_id = args.destination
-                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?', style='danger')
+                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
+                                         style='danger')
 
-                task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
+                task_color = random.choice(
+                    ['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white',
+                     'bright_black'])
 
                 # Create the task
                 task = uploader.upload_video_with_progress(

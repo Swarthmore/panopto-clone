@@ -1,20 +1,19 @@
 import asyncio
+import codecs
+import copy
 import os
 import random
-from math import ceil
-import aiohttp
-import codecs
 import time
 from datetime import datetime
-import copy
-import aioboto3
-import math
 
-from constants import CACHE_UPLOADED_FILES
-from utils import bytes_to_megabytes
+import aioboto3
+import aiohttp
 from boto3.s3.transfer import S3TransferConfig
 from botocore.config import Config
-from constants import MAX_PROCESSING_POLL_TIME, PART_SIZE, MANIFEST_FILE_TEMPLATE, MANIFEST_FILE_NAME, DELAY
+
+from constants import CACHE_UPLOADED_FILES
+from constants import MAX_PROCESSING_POLL_TIME, PART_SIZE, DELAY
+from utils import bytes_to_megabytes
 
 
 class PanoptoUploader:
@@ -139,7 +138,8 @@ class PanoptoUploader:
             progress.console.log(log_msg)
             progress.update(
                 task_id,
-                visible=True
+                visible=True,
+                completed=completed
             )
             # Optionally, update the task's progress bar here
             if completed:
@@ -148,7 +148,8 @@ class PanoptoUploader:
                     completed=completed
                 )
 
-        await self.upload_video(session=session, file_path=file_path, folder_id=folder_id, progress=progress, task_id=task_id, update_progress=update_progress, manifest=manifest)
+        await self.upload_video(session=session, file_path=file_path, folder_id=folder_id, progress=progress,
+                                task_id=task_id, update_progress=update_progress, manifest=manifest)
 
         # Write the file path, folder location, and other stats to disk
         try:
@@ -178,31 +179,45 @@ class PanoptoUploader:
         """
         Main upload method to go through all required steps.
         """
+
+        TOTAL_STEPS = 6
+
         # step 1 - Create a session
         update_progress("Creating session")
-        session_upload = await self.__create_session(session=session, folder_id=folder_id, update_progress=update_progress)
+        session_upload = await self.__create_session(session=session, folder_id=folder_id,
+                                                     update_progress=update_progress)
         upload_id = session_upload['ID']
         upload_target = session_upload['UploadTarget']
+        update_progress('Finished creating session', completed=1)
 
         # step 2 - upload the video file
         update_progress("Uploading file")
-        await self.__multipart_upload_single_file_with_retry(upload_target=upload_target, progress=progress, task_id=task_id, update_progress=update_progress, file_path=file_path)
+        await self.__multipart_upload_single_file_with_retry(upload_target=upload_target, progress=progress,
+                                                             task_id=task_id, update_progress=update_progress,
+                                                             file_path=file_path)
+        update_progress('Finished uploading file', completed=2)
 
         # step 3 - create manifest file and upload it
         update_progress("Creating manifest")
         self.__create_manifest_for_video(file_path=file_path, manifest=manifest)
-        await self.__multipart_upload_single_file(upload_target=upload_target, progress=progress, task_id=task_id, update_progress=update_progress, file_path=manifest)
+        await self.__multipart_upload_single_file(upload_target=upload_target, progress=progress, task_id=task_id,
+                                                  update_progress=update_progress, file_path=manifest)
+        update_progress('Finished creating manifest', completed=3)
 
         # step 4 - finish the upload
         update_progress("Finishing upload")
         await self.__finish_upload(session_upload=session_upload, session=session, update_progress=update_progress)
+        update_progress('Finished upload', completed=4)
 
         # step 5 - monitor the progress of processing
         update_progress("Monitoring Panopto processing")
-        await self.__monitor_progress(upload_id=upload_id, session=session, update_progress=update_progress, max_time=MAX_PROCESSING_POLL_TIME)
+        await self.__monitor_progress(upload_id=upload_id, session=session, update_progress=update_progress,
+                                      max_time=MAX_PROCESSING_POLL_TIME)
+        update_progress('Finished monitoring', completed=5)
 
         # step 6 - clean up manifest
         os.unlink(manifest)
+        update_progress('Done with file', completed=6)
 
     async def find_folder(self, session, search_query):
         try:
@@ -235,7 +250,8 @@ class PanoptoUploader:
                 break
         return await resp.json()
 
-    async def __multipart_upload_single_file_with_retry(self, upload_target, file_path, task_id, progress, update_progress=None):
+    async def __multipart_upload_single_file_with_retry(self, upload_target, file_path, task_id, progress,
+                                                        update_progress=None):
 
         retry_count = 0
         max_retries = 3
@@ -244,8 +260,11 @@ class PanoptoUploader:
         while True:
             try:
                 # Attempt the operation
-                await self.__multipart_upload_single_file(upload_target=upload_target, task_id=task_id, progress=progress, update_progress=update_progress, file_path=file_path)
+                await self.__multipart_upload_single_file(upload_target=upload_target, task_id=task_id,
+                                                          progress=progress, update_progress=update_progress,
+                                                          file_path=file_path)
                 break  # If successful, exit the loop
+
             except Exception as e:
                 # Check if it's a retryable error
                 if retry_count >= max_retries:
@@ -277,8 +296,6 @@ class PanoptoUploader:
         prefix = elements[-1]
         object_key = f'{prefix}/{os.path.basename(file_path)}'
 
-        print(f'Object key: {object_key}')
-
         session = aioboto3.Session()
 
         botocore_config = Config(max_pool_connections=workers)
@@ -296,28 +313,32 @@ class PanoptoUploader:
                 file_size = os.path.getsize(file_path)
                 file_size_mb = bytes_to_megabytes(file_size)
 
-                print(f'{file_path} is {file_size_mb}Mb')
+                # Create a new task to monitor upload progress
+                upload_progress_task = progress.add_task(
+                    f'[green][dim]Uploading[/dim] {os.path.basename(file_path)}[/green]', total=file_size,
+                    visible=True)
 
                 try:
-                    def progress(_bytes):
-                        uploaded_mb = bytes_to_megabytes(_bytes)
-                        pct_complete = ceil((_bytes / file_size) * 100)
-                        update_progress(f'Uploaded [green][dim]{uploaded_mb:.2f}[/dim][/green]/[green]{file_size_mb:.2f}[/green]Mb')
-                        progress.update(task_id, refresh=True, percentage=round(pct_complete, 2))
+                    def progress_cb(uploaded_bytes):
+                        print(f'Uploaded {uploaded_bytes}b')
+                        progress.advance(upload_progress_task, advance=uploaded_bytes)
 
-                    transfer_config = S3TransferConfig(
-                        multipart_chunksize=PART_SIZE
-                    )
+                    transfer_config = S3TransferConfig(multipart_chunksize=PART_SIZE)
                     start_time = time.perf_counter()
-                    await s3.upload_fileobj(file, Bucket=bucket, Key=object_key, Callback=progress,
+
+                    await s3.upload_fileobj(file, Bucket=bucket, Key=object_key, Callback=progress_cb,
                                             Config=transfer_config)
+
                     end_time = time.perf_counter()
                     upload_time = end_time - start_time
                     speed_mbps = (file_size / upload_time) / (1024 * 1024)  # Upload speed in MBps
 
+                    # Update the main progress bar
                     msg = f'Uploaded [yellow]{os.path.basename(file_path)}[/yellow] ([green]{file_size_mb}Mb[/green]) in [blue]{upload_time: .2f}s[/blue] with an average speed of [orange]{speed_mbps: .2f}MBps[/orange]'
-
                     update_progress(msg)
+
+                    # Update the upload progress bar
+                    progress.update(upload_progress_task, completed=True, visible=False)
 
                     return
 
@@ -411,4 +432,5 @@ class PanoptoUploader:
             await asyncio.wait_for(poll(), timeout=max_time)
 
         except asyncio.TimeoutError:
-            update_progress(f"[bold][yellow]Polling operation timed out. This could be due to the size or format of the file. Panopto will still process the file.[/yellow][/bold]")
+            update_progress(
+                f"[bold][yellow]Polling operation timed out. This could be due to the size or format of the file. Panopto will still process the file.[/yellow][/bold]")

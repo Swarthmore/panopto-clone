@@ -4,7 +4,7 @@ CACHE_UPLOADED_FILES = '.uploaded_files.cache'
 
 # Size of each part of multipart upload.
 # This must be between 5MB and 25MB. Panopto server may fail if the size is more than 25MB.
-PART_SIZE = 25 * 1024 * 1024
+PART_SIZE = 8 * 1024 * 1024
 
 # Template for manifest XML file.
 MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
