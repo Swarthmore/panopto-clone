@@ -150,24 +150,25 @@ async def main():
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
 
-                MANIFEST_FILE_TEMPLATE = args.manifest_template if args.manifest_template else 'src/upload_manifest_template.xml'
+                MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
                 print(f'Using manifest template: {MANIFEST_FILE_TEMPLATE}')
 
                 # create a unique id for the files to prevent collisions
                 guid = uuid.uuid4()
-                manifest = f'.cache/{guid}'
+                manifest = f'.cache/{guid}.xml'
 
                 # copy the manifest file template
                 shutil.copyfile(MANIFEST_FILE_TEMPLATE, manifest)
                 print(f'Copied manifest to {manifest}')
+
+                print(f'{file} -> {manifest}')
 
                 # This will select the id of the first item in filtered_dict
                 if filtered_dict:
                     target_folder_id = next(iter(filtered_dict.values()))['Id']
                 else:
                     target_folder_id = args.destination
-                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
-                                         style='danger')
+                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?', style='danger')
 
                 task_color=random.choice(['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white', 'bright_black'])
 
@@ -179,7 +180,7 @@ async def main():
                     file_path=file,
                     task_id=task_id,
                     task_color=task_color,
-                    manifest_file_name=manifest)
+                    manifest=manifest)
 
                 tasks.append(task)
 
