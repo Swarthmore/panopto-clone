@@ -1,6 +1,6 @@
 # panopto-clone
 
-Clone a source directory into a Panopto folder
+Clone a local directory into a Panopto folder
 
 ## Dependencies
 
