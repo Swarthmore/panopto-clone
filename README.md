@@ -19,7 +19,7 @@ source bin/activate
 pip install -r requirements.txt
 
 # Run python_clone script (you may need to chmod +X it
-./panopto_clone --help
+python ./src/panopto_clone --help
 ```
 
 ## Usage
