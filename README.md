@@ -22,7 +22,15 @@ pip install -r requirements.txt
 ./panopto_clone --help
 ```
 
-## How to Use
+## Usage
+
+Before running, you will need to set up an API client in your Panopto installation. The following redirects are required:
+
+```
+Redirect URL: http://localhost:9127/redirect 
+CORS Origin URL: http://localhost:9127
+Logout Redirect URL: http://localhost:9127
+```
 
 ```
 usage: panopto_clone.py [-h] --server SERVER --destination DESTINATION --source SOURCE --client-id CLIENT_ID --client-secret CLIENT_SECRET
