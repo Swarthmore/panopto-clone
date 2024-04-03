@@ -2,40 +2,52 @@
 
 Clone a source directory into a Panopto folder
 
+## Dependencies
 
-## Scripts
+* `python3-venv`
 
-`python3 src/panopto_upload_file.py` - Upload a single file to Panopto
+## Quickstart
+
+```bash
+# Create a python3 virtual environment (requires python3-venv package)
+python 3 -m venv .
+
+# Enter your new environment
+source bin/activate
+
+# Install python dependencies
+pip install -r requirements.txt
+
+# Run python_clone script (you may need to chmod +X it
+./panopto_clone --help
+```
+
+## How to Use
 
 ```
-usage: panopto_upload_file.py [-h] --server SERVER --folder-id FOLDER_ID --upload-file UPLOAD_FILE --client-id CLIENT_ID --client-secret CLIENT_SECRET [--skip-verify]
+usage: panopto_clone.py [-h] --server SERVER --destination DESTINATION --source SOURCE --client-id CLIENT_ID --client-secret CLIENT_SECRET
+                        [--skip-verify] [--manifest-template MANIFEST_TEMPLATE] [--clean] [--max-concurrent-tasks MAX_CONCURRENT_TASKS]
 
-Upload a single video file to Panopto server
+Upload a folder to Panopto
 
 options:
   -h, --help            show this help message and exit
   --server SERVER       Server name as FQDN
-  --folder-id FOLDER_ID
+  --destination DESTINATION
                         ID of target Panopto folder
-  --upload-file UPLOAD_FILE
-                        File to be uploaded
+  --source SOURCE       Absolute path to source folder
   --client-id CLIENT_ID
                         Client ID of OAuth2 client
   --client-secret CLIENT_SECRET
                         Client Secret of OAuth2 client
-  --skip-verify         Skip SSL certificate verification. (Never apply to the production code)
+  --skip-verify         (optional) Skip SSL certificate verification. (Never apply to the production code)
+  --manifest-template MANIFEST_TEMPLATE
+                        (optional, default=src/upload_manifest_template.xml) Absolute path to manifest template
+  --clean               (optional) Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.
+  --max-concurrent-tasks MAX_CONCURRENT_TASKS
+                        (optional, default=5) How many uploads should occur concurrently.
 ```
 
-`python3 src/panopto_create_folder.py` - Create a folder in Panopto
+## Issues & Contributions
 
-```
-Not implemented
-```
-
-`python3 src/panopto_create_folder_tree.py` - Create a folder tree in Panopto
-
-```
-Not implemented
-```
-
-`python3 src/panopto_clone.py` - Clone a source directory into Panopto
+Are welcome!

@@ -1,111 +1,202 @@
 import argparse
+import random
+
+import aiohttp
 from panopto_oauth2 import PanoptoOAuth2
 from panopto_uploader import PanoptoUploader
+from panopto_utils import create_directory_skeleton
+from utils import write_list_to_file, retrieve_dict_from_disk, save_dict_to_disk
 import urllib3
+import asyncio
+from pathlib import Path
+from rich.console import Console
+from rich.progress import Progress
 import os
 import shutil
+import uuid
+from constants import CACHE_CREATED_FOLDERS, CACHE_FILES_TO_UPLOAD, CACHE_UPLOADED_FILES
+from theme import panopto_clone_theme
+
 
 def parse_argument():
     """
     Argument definition and handling.
     """
-    parser = argparse.ArgumentParser(description='Upload a single video file to Panopto server')
-    parser.add_argument('--server', dest='server', required=True, help='Server name as FQDN')
-    parser.add_argument('--destination', dest='destination', required=True, help='ID of target Panopto folder')
-    parser.add_argument('--source', dest='source', required=True, help='Absolute path to source folder')
-    parser.add_argument('--client-id', dest='client_id', required=True, help='Client ID of OAuth2 client')
-    parser.add_argument('--client-secret', dest='client_secret', required=True, help='Client Secret of OAuth2 client')
-    parser.add_argument('--skip-verify', dest='skip_verify', action='store_true', required=False,
-                        help='Skip SSL certificate verification. (Never apply to the production code)')
+    parser = argparse.ArgumentParser(description='Upload a folder to Panopto')
+
+    parser.add_argument('--server',
+                        dest='server',
+                        required=True,
+                        help='Server name as FQDN')
+
+    parser.add_argument('--destination',
+                        dest='destination',
+                        required=True,
+                        help='ID of target Panopto folder')
+
+    parser.add_argument('--source',
+                        dest='source',
+                        required=True,
+                        help='Absolute path to source folder')
+
+    parser.add_argument('--client-id',
+                        dest='client_id',
+                        required=True,
+                        help='Client ID of OAuth2 client')
+
+    parser.add_argument('--client-secret',
+                        dest='client_secret',
+                        required=True,
+                        help='Client Secret of OAuth2 client')
+
+    parser.add_argument('--skip-verify',
+                        dest='skip_verify',
+                        action='store_true',
+                        required=False,
+                        help='(optional) Skip SSL certificate verification. (Never apply to the production code)')
+
+    parser.add_argument('--manifest-template',
+                        dest='manifest_template',
+                        required=False,
+                        help="(optional, default=src/upload_manifest_template.xml) Absolute path to manifest template")
+
+    parser.add_argument("--clean",
+                        dest="clean",
+                        action='store_true',
+                        required=False,
+                        help="(optional) Force removal of .cache files. WARNING: Doing this will likely create duplicate folders.")
+
+    parser.add_argument("--max-concurrent-tasks",
+                        dest="max_concurrent_tasks",
+                        default=5,
+                        required=False,
+                        help="(optional, default=5) How many uploads should occur concurrently.")
 
     return parser.parse_args()
 
 
-def has_files(directory):
-    """
-    Check if there are any files in directory.
-    """
-    for root, _, files in os.walk(directory):
-        for file in files:
-            return True
-    return False
-
-
-
-def cleanup(filepath, dest="Processed/"):
-    # Ensure dest is created
-    if not os.path.exists(dest):
-        os.makedirs(dest)
-
-    # Move the file to it's destination
-    try:
-        shutil.move(filepath, dest)
-    except Exception as e:
-        print(f'Error: {e}')
-
-
-def clone(source_directory, uploader, parent_folder_id=None, max_errors = 5):
-    """
-    Copy a directory to Panopto
-    Directories are created in Panopto before the files are uploaded.
-    Empty directories are not created.
-    """
-
-    error_count = 0
-
-    if error_count <= max_errors:
-
-        for item in os.listdir(source_directory):
-            item_path = os.path.join(source_directory, item)
-
-            if os.path.isdir(item_path):
-
-                # Only process if there are files in item_path
-                if has_files(item_path):
-
-                    # Create the folder
-                    folder = uploader.create_folder(
-                        folder_id=parent_folder_id,
-                        folder_name=os.path.basename(item_path),
-                        folder_description="Created by panopto-clone script")
-
-                    # Recurse into the directory after creating it in Panopto
-                    clone(item_path, uploader, folder['Id'])
-
-            elif os.path.isfile(item_path):
-
-                try:
-                    # If the resource is a file, upload it.
-                    res = uploader.upload_video(file_path=item_path, folder_id=parent_folder_id)
-
-                    # Cleanup the file on the host.
-                    cleanup(item_path, "Processed/")
-
-                except Exception as e:
-                    # If there's an error, move the file to a folder, Failed/
-                    cleanup(item_path, "Failed/")
-                    error_count += 1
-    else:
-        print('Error count reached')
-
-
-def main():
+async def main():
     args = parse_argument()
 
-    if args.skip_verify:
-        # This line is needed to suppress annoying warning message.
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    progress = Progress(
+        "[progress.description]{task.description}",
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        console=Console(theme=panopto_clone_theme))
 
-    oauth2 = PanoptoOAuth2(args.server, args.client_id, args.client_secret, not args.skip_verify)
+    with progress:
 
-    uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
+        # Before doing anything, check to see if the user want's to clean their cache
+        if args.clean:
+            # Remove .cache files.
+            if os.path.exists(CACHE_CREATED_FOLDERS):
+                progress.console.log(f'Deleting {CACHE_CREATED_FOLDERS}', style='info')
+                os.remove(CACHE_CREATED_FOLDERS)
 
-    clone(
-        source_directory=args.source,
-        parent_folder_id=args.destination,
-        uploader=uploader
-    )
+            if os.path.exists(CACHE_FILES_TO_UPLOAD):
+                progress.console.log(f'Deleting {CACHE_FILES_TO_UPLOAD}', style='info')
+                os.remove(CACHE_FILES_TO_UPLOAD)
+
+            if os.path.exists(CACHE_UPLOADED_FILES):
+                progress.console.log(f'Deleting {CACHE_UPLOADED_FILES}', style='info')
+                os.remove(CACHE_UPLOADED_FILES)
+
+        if args.skip_verify:
+            # This line is needed to suppress annoying warning message.
+            progress.console.log('SSL verification is off', style='info')
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        progress.console.log('Authorizing with Panopto', style='info')
+
+        oauth2 = PanoptoOAuth2(args.server, args.client_id, args.client_secret, not args.skip_verify)
+
+        access_token = oauth2.get_access_token_authorization_code_grant()
+
+        progress.console.log('Creating uploader', style='info')
+
+        uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
+
+        async with aiohttp.ClientSession() as session:
+
+            # Set the access token
+            session.headers.update({'Authorization': 'Bearer ' + access_token})
+
+            # Check to see if folders.cache exists
+            if os.path.exists(CACHE_CREATED_FOLDERS):
+                progress.console.log('Using directories from cache', style='info')
+                created_folders = retrieve_dict_from_disk(CACHE_CREATED_FOLDERS)
+            else:
+                # Create the directories
+                progress.console.log('Creating directories', style='info')
+                created_folders = await create_directory_skeleton(
+                    source_directory=args.source,
+                    uploader=uploader,
+                    parent_folder_id=args.destination,
+                    session=session,
+                    progress=progress
+                )
+                save_dict_to_disk(created_folders, CACHE_CREATED_FOLDERS)
+                progress.console.log('Saved created folders cache', style='info')
+
+            # Get a list of all files that will be uploaded
+            tasks = []
+            files = [str(file) for file in Path(args.source).rglob('*') if file.is_file()]
+            progress.console.log(f'Found {len(files)} videos', style='info')
+            write_list_to_file(CACHE_FILES_TO_UPLOAD, files)
+            progress.console.log(f'Saved files to upload cache', style='info')
+
+            for file in files:
+
+                # total = 6 steps to complete
+                task_id = progress.add_task(f'Process {os.path.basename(file)}', total=6, visible=False)
+
+                parent_folder = os.path.basename(os.path.dirname(file))
+                filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}
+
+                MANIFEST_FILE_TEMPLATE = 'src/upload_manifest_template.xml'
+
+                # create a unique id for the files to prevent collisions
+                guid = uuid.uuid4()
+                manifest = f'.cache/{guid}.xml'
+
+                # copy the manifest file template
+                shutil.copyfile(MANIFEST_FILE_TEMPLATE, manifest)
+
+                # This will select the id of the first item in filtered_dict
+                if filtered_dict:
+                    target_folder_id = next(iter(filtered_dict.values()))['Id']
+                else:
+                    target_folder_id = args.destination
+                    progress.console.log(f'Could not find target_folder_id in filtered_dict. Is filtered_dict empty?',
+                                         style='danger')
+
+                task_color = random.choice(
+                    ['blue', 'bright_blue', 'magenta', 'bright_magenta', 'cyan', 'bright_cyan', 'white',
+                     'bright_black'])
+
+                # Create the task
+                task = uploader.upload_video_with_progress(
+                    folder_id=target_folder_id,
+                    session=session,
+                    progress=progress,
+                    file_path=file,
+                    task_id=task_id,
+                    task_color=task_color,
+                    manifest=manifest)
+
+                tasks.append(task)
+
+            progress.console.log(f'Scheduled {len(tasks)} upload tasks', style='info')
+
+            # Function to process tasks in chunks
+            async def process_tasks_in_chunks(tasks_to_chunk, chunk_size):
+                for i in range(0, len(tasks_to_chunk), chunk_size):
+                    chunk = tasks_to_chunk[i:i + chunk_size]
+                    await asyncio.gather(*chunk)
+                    progress.console.log(f"Uploaded {len(chunk)} chunks of files", style='info')
+
+            # Now process tasks in chunks defined by max_concurrent_tasks
+            await process_tasks_in_chunks(tasks, int(args.max_concurrent_tasks))
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
