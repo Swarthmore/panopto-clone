@@ -99,6 +99,10 @@ async def main():
             if os.path.exists(CACHE_UPLOADED_FILES):
                 progress.console.log(f'Deleting {CACHE_UPLOADED_FILES}', style='info')
                 os.remove(CACHE_UPLOADED_FILES)
+            
+            if os.path.exists('.cache'):
+                progress.console.log(f'Deleting .cache/', style='info')
+                shutil.rmtree('.cache')
 
         if args.skip_verify:
             # This line is needed to suppress annoying warning message.
@@ -114,6 +118,10 @@ async def main():
         progress.console.log('Creating uploader', style='info')
 
         uploader = PanoptoUploader(args.server, not args.skip_verify, oauth2)
+
+        # create the cache folder if it doens't exist
+        if not os.path.exists('.cache'):
+            os.mkdir('.cache')
 
         async with aiohttp.ClientSession() as session:
 
@@ -147,7 +155,7 @@ async def main():
             for file in files:
 
                 # total = 6 steps to complete
-                task_id = progress.add_task(f'Process {os.path.basename(file)}', total=6, visible=False)
+                task_id = progress.add_task(f'Total Progress {os.path.basename(file)}', total=6, visible=False)
 
                 parent_folder = os.path.basename(os.path.dirname(file))
                 filtered_dict = {k: v for (k, v) in created_folders.items() if parent_folder in k}

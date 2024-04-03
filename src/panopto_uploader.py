@@ -315,12 +315,13 @@ class PanoptoUploader:
 
                 # Create a new task to monitor upload progress
                 upload_progress_task = progress.add_task(
-                    f'[green][dim]Uploading[/dim] {os.path.basename(file_path)}[/green]', total=file_size,
+                    f'[green][dim]Upload progress[/dim] {os.path.basename(file_path)}[/green]', total=file_size,
                     visible=True)
 
                 try:
+                    
                     def progress_cb(uploaded_bytes):
-                        progress.advance(upload_progress_task, advance=uploaded_bytes)
+                        progress.update(upload_progress_task, advance=uploaded_bytes)
 
                     transfer_config = S3TransferConfig(multipart_chunksize=PART_SIZE)
                     start_time = time.perf_counter()

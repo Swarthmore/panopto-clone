@@ -10,14 +10,14 @@ from oauthlib.oauth2 import LegacyApplicationClient  # specific to Resource Owne
 from requests_oauthlib import OAuth2Session
 
 # This code uses this local URL as redirect target for Authorization Code Grant (Server-side Web Application)
-REDIRECT_URL = 'http://localhost:9127/redirect'
 REDIRECT_PORT = 9127
+REDIRECT_URL = f'http://localhost:{REDIRECT_PORT}/redirect'
 
 # Typical scope for accessing Panopto API.
 DEFAULT_SCOPE = ('openid', 'api')
 
 
-class PanoptoOAuth2:
+class PanoptoOAuth2():
     def __init__(self, server, client_id, client_secret, ssl_verify):
         self.client_id = client_id
         self.client_secret = client_secret
